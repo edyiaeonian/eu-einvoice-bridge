@@ -1,0 +1,32 @@
+# 機密資料 — 絕對不可進入 git 歷史
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+certs/
+secrets/
+
+# 送件狀態的本地紀錄(含 KSeF 參考編號)
+state/
+*.upo.xml
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# 測試與工具
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# macOS
+.DS_Store
