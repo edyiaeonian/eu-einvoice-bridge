@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "eu-einvoice-bridge"
+version = "0.1.0"
+description = "Bridge a neutral invoice model to EN16931 (UBL 2.1) and Poland's KSeF FA(3)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "Edward Jiang" }]
+
+dependencies = [
+    "pydantic>=2.9",
+    "lxml>=5.3",
+    "saxonche>=13.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "respx>=0.21",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+einvoice = "eu_einvoice_bridge.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/eu_einvoice_bridge"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# 整合測試預設不執行:需要網路與 KSeF 沙箱,沙箱不可用時不應讓測試全紅。
+# 執行方式:pytest -m integration
+addopts = "-m 'not integration'"
+markers = [
+    "integration: 需要網路與 KSeF 沙箱的測試(預設跳過)",
+]
