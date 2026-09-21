@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 Edward Jiang
+Copyright (c) 2025 Ministerstwo Finansów
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,17 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-THIRD-PARTY ASSETS
-
-This licence covers the source code authored in this repository. It does NOT
-cover the third-party schemas and validation artefacts vendored under `assets/`,
-each of which keeps its own licence:
-
-  assets/en16931/  EUPL v1.2            see assets/en16931/LICENSE.txt
-  assets/ubl21/    OASIS copyright      notices retained in each file
-  assets/fa3/      MIT, Ministerstwo Finansow   see assets/fa3/LICENSE.txt
-
-See assets/README.md for provenance and version details.

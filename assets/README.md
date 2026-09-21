@@ -77,6 +77,32 @@ EUPL 1.2 要求:
 
 ---
 
-## 尚待加入
+## FA(3) Schema(波蘭財政部)
 
-- FA(3) XSD(波蘭財政部)—— 階段二需要
+| 項目 | 內容 |
+|---|---|
+| 來源 | `github.com/CIRFMF/ksef-docs`,路徑 `faktury/schemy/FA/` |
+| 固定版本 | commit `7533a8008be0ba5a434277a2ee3b0f3d74f53693`(以雜湊值固定,不指向會變動的 `main`) |
+| 檔案 | `schemat_FA(3)_v1-0E.xsd` 與 `bazowe/` 下三個基礎 schema(v10-0E) |
+| 命名空間 | `http://crd.gov.pl/wzor/2025/06/25/13775/` |
+| 取得日期 | 2026-09-21 |
+| **授權** | **MIT**,Copyright (c) 2025 Ministerstwo Finansów(全文見 `fa3/LICENSE.txt`,保留原檔名) |
+
+### 與正式發布版本的比對
+
+法律上的正式版本發布於 CRD(`crd.gov.pl/wzor/2025/06/25/13775/schemat.xsd`)。兩者經正規化比對(去除空白節點與註解後做 C14N)**語意相同**。
+
+三個基礎 schema 與 `crd.gov.pl/xml/schematy/dziedzinowe/mf/2022/01/05/eD/DefinicjeTypy/` 上的版本位元組並不相同,逐一查明差異:
+
+| 檔案 | 差異 |
+|---|---|
+| `StrukturyDanych`、`ElementarneTypyDanych` | 只在空白、註解,以及 include 寫成絕對網址或相對路徑 |
+| `KodyKrajow` | 只在格式;254 個國家代碼與說明文字逐一比對完全一致 |
+
+### 離線載入
+
+主 schema 以**絕對網址**引用 `StrukturyDanych`。驗證模組在載入時以 lxml `Resolver` 把該網址前綴對應到 `bazowe/`,**官方檔案維持原樣**。解析器設定 `no_network=True`,且對應只涵蓋這一個前綴:若 schema 引用了其他網址,載入會失敗,而不是偷偷連網。`tests/test_fa3_schema.py` 以「不加對應就載入失敗」證明這一點。
+
+### 沒有官方範例發票
+
+官方 GitHub 只提供 UPO 收據範例,CRD 只有 schema、樣式表與識別檔,KSeF 網站上的範例連結為動態載入、無法以程式取得。因此 `tests/fixtures/fa3_minimal.xml` 為**手寫**素材,並以一組負面測試確認 schema 確實會拒絕不合法的文件,避免「手寫素材剛好通過一個什麼都放行的驗證」。

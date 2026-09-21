@@ -220,14 +220,19 @@ BT/BR identifiers throughout are language-independent.
 
 ## Third-party assets
 
-`assets/` holds the official EN16931 validation artefacts, vendored unmodified from
-[ConnectingEurope/eInvoicing-EN16931](https://github.com/ConnectingEurope/eInvoicing-EN16931)
-at release `validation-1.3.16`. They are licensed under the **EUPL v1.2**, separately
-from this repository's own code.
+`assets/` holds official schemas and validation artefacts, vendored unmodified so
+that every test runs offline. Each keeps its own licence, separate from this
+repository's code:
 
-See [`assets/README.md`](assets/README.md) for provenance and
-[`assets/en16931/LICENSE.txt`](assets/en16931/LICENSE.txt) for the licence text.
+| Path | Source | Licence |
+|---|---|---|
+| `assets/en16931/` | [ConnectingEurope/eInvoicing-EN16931](https://github.com/ConnectingEurope/eInvoicing-EN16931), `validation-1.3.16` | EUPL v1.2 |
+| `assets/ubl21/` | OASIS UBL 2.1 | OASIS copyright, notices retained |
+| `assets/fa3/` | [CIRFMF/ksef-docs](https://github.com/CIRFMF/ksef-docs), pinned commit | MIT, Polish Ministry of Finance |
+
+See [`assets/README.md`](assets/README.md) for provenance, pinned versions, and how
+each copy was checked against the officially published one.
 
 ## Licence
 
-Source code: MIT — see [LICENSE](LICENSE). Vendored assets: EUPL v1.2, as above.
+Source code: MIT — see [LICENSE](LICENSE). Vendored assets: each under its own licence, as above.
