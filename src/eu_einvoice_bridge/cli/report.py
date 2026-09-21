@@ -14,6 +14,7 @@ from ..validate import Severity, ValidationIssue
 LAYER_NAMES = {
     "json": "input",
     "model": "model",
+    "mapping": "FA(3) mapping",
     "xml": "xml",
     "xsd": "schema",
     "schematron": "business rules",
@@ -98,8 +99,14 @@ def format_issues(source_name: str, issues: list[ValidationIssue]) -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
+FORMAT_LABELS = {"ubl": "EN16931 (UBL 2.1)", "fa3": "FA(3)"}
+
+
 def format_success(
-    source_name: str, invoice, warnings: list[ValidationIssue] = ()
+    source_name: str,
+    invoice,
+    warnings: list[ValidationIssue] = (),
+    fmt: str = "ubl",
 ) -> str:
     categories = {entry.category.value for entry in invoice.vat_breakdown}
     heading = f"{source_name}: valid"
@@ -107,7 +114,7 @@ def format_success(
         heading += f", {_plural(len(warnings), 'warning')}"
     out = [
         heading,
-        f"  EN16931 (UBL 2.1), {_plural(len(invoice.lines), 'line')}, "
+        f"  {FORMAT_LABELS[fmt]}, {_plural(len(invoice.lines), 'line')}, "
         f"VAT categories {', '.join(sorted(categories))}",
         f"  total {invoice.totals.total_with_vat} {invoice.currency}, "
         f"due {invoice.totals.amount_due} {invoice.currency}",

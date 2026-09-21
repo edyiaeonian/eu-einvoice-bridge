@@ -164,7 +164,15 @@ python3 -m venv .venv
 
 ./.venv/bin/einvoice validate examples/invoice.json
 ./.venv/bin/einvoice convert examples/invoice.json -o invoice.xml
+
+# Poland's FA(3); the same input also converts to UBL
+./.venv/bin/einvoice validate examples/invoice-fa3.json --format fa3
+./.venv/bin/einvoice convert examples/invoice-fa3.json --format fa3 -o invoice-fa3.xml
 ```
+
+`examples/invoice.json` is refused for FA(3), on purpose: it carries a document-level
+allowance, which lowers the tax base in EN16931 and has no counterpart in FA(3), and
+it lacks the Polish statutory declarations. The report names both.
 
 Tests run fully offline, including the Schematron validation, because the official
 validation artefacts are vendored rather than fetched.

@@ -1,0 +1,75 @@
+{
+  "number": "FV/2026/002",
+  "issue_date": "2026-09-21",
+  "due_date": "2026-10-21",
+  "type_code": "380",
+  "currency": "PLN",
+  "seller": {
+    "name": "Acme sp. z o.o.",
+    "vat_id": "PL5555555555",
+    "vat_scheme": "PL",
+    "address": {
+      "street": "ul. Marszałkowska 1",
+      "city": "Warszawa",
+      "postal_code": "00-001",
+      "country": "PL"
+    }
+  },
+  "buyer": {
+    "name": "Buyer sp. z o.o.",
+    "vat_id": "PL1111111111",
+    "vat_scheme": "PL",
+    "address": {
+      "street": "ul. Prosta 2",
+      "city": "Kraków",
+      "postal_code": "30-001",
+      "country": "PL"
+    }
+  },
+  "lines": [
+    {
+      "line_id": "1",
+      "name": "Widget",
+      "description": "A useful widget",
+      "quantity": "2",
+      "unit_code": "C62",
+      "unit_price": "50.00",
+      "net_amount": "100.00",
+      "vat_category": "S",
+      "vat_rate": "0.23"
+    },
+    {
+      "line_id": "2",
+      "name": "Manual",
+      "quantity": "1",
+      "unit_code": "C62",
+      "unit_price": "40.00",
+      "net_amount": "40.00",
+      "vat_category": "S",
+      "vat_rate": "0.08"
+    },
+    {
+      "line_id": "3",
+      "name": "Training",
+      "quantity": "3",
+      "unit_code": "HUR",
+      "unit_price": "20.00",
+      "net_amount": "60.00",
+      "vat_category": "E",
+      "vat_rate": "0",
+      "exemption_reason": "Art. 43 ust. 1 pkt 29 ustawy o VAT"
+    }
+  ],
+  "prepaid_amount": "50.00",
+  "extras": {
+    "buyer_local_government_unit": false,
+    "buyer_vat_group_member": false,
+    "cash_accounting": false,
+    "self_billing": false,
+    "split_payment": false,
+    "simplified_triangular_procedure": false,
+    "margin_scheme": false,
+    "intra_eu_new_means_of_transport": false,
+    "exemption_basis": "polish_act"
+  }
+}

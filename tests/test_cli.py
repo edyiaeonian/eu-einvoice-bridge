@@ -7,12 +7,13 @@ place to look.
 
 import importlib
 import json
+from pathlib import Path
 from decimal import Decimal
 
 import pytest
 
 from eu_einvoice_bridge.cli import main
-from eu_einvoice_bridge.validate import Severity, ValidationIssue
+from eu_einvoice_bridge.validate import Severity, ValidationIssue, validate_fa3
 
 # The cli package re-exports the main() function under the same name, so the
 # dotted path eu_einvoice_bridge.cli.main resolves to the function, not the
@@ -236,3 +237,64 @@ class TestHugeNumbers:
         assert code == 1
         assert "Traceback" not in output
         assert f"lines.0.{field}" in output
+
+
+EXAMPLES = Path(__file__).parents[1] / "examples"
+FA3_EXAMPLE = EXAMPLES / "invoice-fa3.json"
+UBL_ONLY_EXAMPLE = EXAMPLES / "invoice.json"
+
+
+class TestFa3Output:
+    """--format fa3: mapping checks, then serialization, then the FA(3) XSD."""
+
+    def test_the_default_format_is_still_ubl(self, tmp_path, capsys):
+        out = tmp_path / "out.xml"
+        code, _ = run(capsys, "convert", str(FA3_EXAMPLE), "-o", str(out))
+        assert code == 0
+        assert b"urn:cen.eu:en16931:2017" in out.read_bytes()
+
+    def test_convert_writes_fa3_that_passes_the_official_schema(self, tmp_path, capsys):
+        out = tmp_path / "out.xml"
+        code, _ = run(capsys, "convert", str(FA3_EXAMPLE), "--format", "fa3", "-o", str(out))
+        assert code == 0
+        assert b"http://crd.gov.pl/wzor/2025/06/25/13775/" in out.read_bytes()
+        assert validate_fa3(out.read_bytes()) == []
+
+    def test_one_input_produces_both_formats(self, tmp_path, capsys):
+        # Phase 2's first acceptance criterion.
+        for fmt in ("ubl", "fa3"):
+            code, output = run(capsys, "validate", str(FA3_EXAMPLE), "--format", fmt)
+            assert code == 0, output
+
+    def test_validate_names_the_format_it_checked(self, capsys):
+        _, output = run(capsys, "validate", str(FA3_EXAMPLE), "--format", "fa3")
+        assert "valid" in output
+        assert "FA(3)" in output
+
+    def test_an_unmappable_invoice_is_refused_with_every_reason(self, tmp_path, capsys):
+        # invoice.json carries a document-level allowance and no declarations.
+        out = tmp_path / "out.xml"
+        code, output = run(
+            capsys, "convert", str(UBL_ONLY_EXAMPLE), "--format", "fa3", "-o", str(out)
+        )
+        assert code == 1
+        assert not out.exists()
+        assert "FA3-NO-DECLARATIONS" in output
+        assert "FA3-DOC-ALLOWANCE" in output
+        assert "FA(3) mapping" in output
+
+    def test_warnings_are_shown_and_the_file_is_still_written(self, tmp_path, capsys):
+        payload = json.loads(FA3_EXAMPLE.read_text(encoding="utf-8"))
+        payload["lines"][0]["line_id"] = "A1"
+        out = tmp_path / "out.xml"
+        code, output = run(
+            capsys, "convert", write(tmp_path, payload), "--format", "fa3", "-o", str(out)
+        )
+        assert code == 0
+        assert out.exists()
+        assert "FA3-DROP-LINE-ID" in output
+
+    def test_the_example_produces_no_warnings(self, capsys):
+        # It exists to show the clean path, so it should stay clean.
+        _, output = run(capsys, "validate", str(FA3_EXAMPLE), "--format", "fa3")
+        assert "warning" not in output
