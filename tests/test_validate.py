@@ -116,19 +116,31 @@ class TestSchematronFailures:
 class TestXsdFailures:
     """XSD catches what Schematron structurally cannot."""
 
-    def test_element_order_is_rejected_even_though_xpath_would_find_it(self):
-        # Schematron locates elements by XPath and is largely order-blind; the
-        # XSD sequence is not. This is why both layers exist.
-        xml = to_ubl(an_invoice())
-        root = etree.fromstring(xml)
+    @staticmethod
+    def _with_issue_date_moved_to_the_end() -> bytes:
+        root = etree.fromstring(to_ubl(an_invoice()))
         cbc = "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
         issue_date = root.find(f"{{{cbc}}}IssueDate")
         root.remove(issue_date)
         root.append(issue_date)
-        reordered = etree.tostring(root, xml_declaration=True, encoding="UTF-8")
+        return etree.tostring(root, xml_declaration=True, encoding="UTF-8")
 
-        issues = validate_ubl(reordered)
+    def test_element_order_is_rejected(self):
+        issues = validate_ubl(self._with_issue_date_moved_to_the_end())
         assert any(i.source == "xsd" for i in issues)
+
+    def test_schematron_alone_would_have_let_the_reordering_through(self):
+        """The evidence that the two layers are not redundant.
+
+        Schematron finds elements by XPath and does not care where they sit;
+        the XSD sequence does. Without this, "we run both" would be an
+        unexamined assumption rather than a reason.
+        """
+        from eu_einvoice_bridge.validate.validator import _schematron_issues
+
+        reordered = self._with_issue_date_moved_to_the_end()
+        assert _schematron_issues(reordered) == []
+        assert any(i.source == "xsd" for i in validate_ubl(reordered))
 
     def test_an_unparseable_document_is_reported_rather_than_raised(self):
         issues = validate_ubl(b"<Invoice>not closed")
