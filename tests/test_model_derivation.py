@@ -347,15 +347,8 @@ class TestCategoryRateConsistency:
             a_line(net="100.00", rate=Decimal("23"))
 
 
-class TestInputsTheModelCannotYetHonour:
-    """Refused up front, because accepting them guarantees an invalid invoice."""
-
-    def test_vat_accounting_currency_is_refused_with_the_reason(self):
-        # BR-53 would then demand BT-111, which needs an exchange rate.
-        with pytest.raises(ValidationError, match="BR-53"):
-            an_invoice(currency="EUR", vat_accounting_currency="PLN")
-
-    def test_prepaid_amount_is_limited_to_two_decimals(self):
+class TestPrepaidAmount:
+    def test_is_limited_to_two_decimals(self):
         # BR-DEC-16. The contract tests cover BT-131 and BT-92; BT-113 is the
         # third monetary input and would otherwise be rounded silently.
         with pytest.raises(ValidationError) as exc:

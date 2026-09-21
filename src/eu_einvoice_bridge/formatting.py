@@ -44,3 +44,8 @@ def price(value: Decimal) -> str:
 def quantity(value: Decimal) -> str:
     """A quantity without trailing zeros; :f keeps it out of exponent form."""
     return f"{value.normalize():f}"
+
+
+def exchange_rate(value: Decimal) -> str:
+    """An exchange rate at its full precision, like a quantity."""
+    return f"{value.normalize():f}"

@@ -10,11 +10,12 @@ syntax, and the **FA(3)** XML that Poland's KSeF requires.
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | Neutral model, UBL serializer, validation chain, CLI error report | ✅ complete |
-| 2 | FA(3) serializer, mismatch handling | planned |
+| 2 | FA(3) serializer, mismatch handling, multi-currency | ✅ complete |
 | 3 | Encryption, KSeF client, UPO retrieval | planned |
 
 The architecture below describes the finished shape; `crypto` and `ksef` arrive in
-phase 3. See [the phase 1 plan](docs/plans/2026-09-20-phase1-implementation-plan.md).
+phase 3. See the plans for [phase 1](docs/plans/2026-09-20-phase1-implementation-plan.md)
+and [phase 2](docs/plans/2026-09-21-phase2-implementation-plan.md).
 
 ---
 
@@ -27,8 +28,8 @@ a tax authority will accept.
 For standard VAT invoices, Poland's KSeF accepts one syntax: its own national schema,
 FA(3). And FA(3) is **not** a one-to-one mapping of EN16931. Some EN16931 business
 terms have no Polish equivalent. Poland requires fields the European standard never
-defined. An invoice in a foreign currency still has to report its tax in PLN, so FA(3)
-carries an exchange rate that EN16931 expresses a different way entirely.
+defined. An invoice in a foreign currency still has to report its tax in PLN, and the two
+standards record that in shapes that share nothing.
 
 Every country running a CTC (continuous transaction control) regime has this problem,
 and there are a lot of them now — Hungary since 2018, Italy since 2019, Poland from
@@ -47,12 +48,11 @@ each difference stays visible in the one place that owns it.
 
 ### The four kinds of mismatch
 
-This is phase 2's job — the FA(3) path does not exist yet. Each case gets a deliberate
-answer, and they are not the same answer:
+Each case gets a deliberate answer, and they are not the same answer:
 
 | Case | Handling |
 |---|---|
-| Both standards have the field | Map directly |
+| Both standards have the field | Map directly, converting its shape where needed |
 | Poland-only, absent from EN16931 | Lives in a named `PolishExtras` model, kept out of the core |
 | EN16931 has it, FA(3) does not | Dropped on the Polish path — but **reported, never silently** |
 | **FA(3) requires it, the neutral model has no field** | **Fail before emitting.** A file certain to be rejected is not worth sending |
@@ -61,16 +61,30 @@ The third and fourth cases pull in opposite directions, which is the point. Drop
 field the other side cannot hold is survivable if you say so. Emitting a file you
 already know is invalid just spends a submission to learn nothing.
 
-**A worked example — foreign currency.** Invoice currency (BT-5) exists on both sides,
-so it maps directly. But Poland wants the tax reported in PLN regardless, so FA(3)
-carries an exchange rate field (`KursWaluty`) that EN16931 has no slot for, while
-EN16931 expresses the same requirement as a separate VAT accounting currency (BT-6).
-One requirement, two unrelated shapes: case 1 and case 2 in the same field.
+**Building the Polish path showed the third case needed a limit.** A prepayment and a
+document-level allowance both subtract money, and they land on opposite sides:
 
-Phase 1 already applies the fourth rule to itself. BT-6 obliges an invoice to carry
-BT-111, the VAT total in that second currency (BR-53, fatal), and that needs an
-exchange rate the model does not have yet. So the model refuses BT-6 outright rather
-than emit an invoice it knows will fail.
+| | Changes the tax base? | In FA(3) |
+|---|---|---|
+| Prepayment (BT-113) | No | `Rozliczenie/Odliczenia`, which adjusts only the payable amount — a clean fit |
+| Document-level allowance (BG-20) | **Yes** (BR-S-08) | Nothing. Dropping it would make the Polish invoice state a different tax from the UBL one |
+
+So a field may only be dropped if losing it changes no amount. One that changes the
+tax base and cannot be carried faithfully blocks FA(3) output instead.
+
+**The clearest single example is VAT itself.** EN16931 describes tax as a category plus
+any rate. FA(3) uses a closed set of Polish codes — `23`, `8`, `0 WDT`, `zw`, `oo` —
+each with its own subtotal slot. A 19% standard rate is perfectly valid EN16931 and has
+nowhere to go in FA(3).
+
+**A worked example — foreign currency.** One requirement, two unrelated shapes.
+EN16931 records only the converted VAT total (BT-111) and never the exchange rate;
+FA(3) records the rate on every line (`KursWaluty`) and the converted tax per rate
+slot (`P_14_xW`). The rate therefore lives in the neutral model and both are derived
+from it. The rounding had to be decided once: at 4.2567 PLN/EUR, converting each rate
+group gives 97.90 + 13.62 = **111.52**, while converting the 26.20 total gives
+**111.53**. Either could be defended; the two documents disagreeing could not. Tax is
+converted once per group and both outputs sum those same figures.
 
 ## What it looks like
 
@@ -110,6 +124,30 @@ $ einvoice validate invoice.json
 invoice.json: valid
   EN16931 (UBL 2.1), 2 lines, VAT categories AE, S
   total 710.70 PLN, due 610.70 PLN
+```
+
+Asking for FA(3) adds a mapping layer that runs before any XML exists. The same
+`invoice.json` cannot be expressed in FA(3), and the report says exactly why — errors
+block the output, warnings name what would be left behind:
+
+```
+$ einvoice convert invoice.json --format fa3
+invoice.json: 2 problems, 2 warnings
+
+FA(3) mapping (2 errors, 2 warnings)
+  FA3-NO-DECLARATIONS
+    at extras
+    FA(3) requires the Polish statutory declarations -- JST, GV and the Adnotacje ...
+  FA3-DOC-ALLOWANCE  BG-20, BG-21
+    at allowance_charges
+    document-level allowances and charges change the tax base (BR-S-08) and FA(3) ...
+  FA3-DROP-BT30  (warning)  BT-30
+    at seller.legal_registration_id
+    ...
+  FA3-DROP-REASON  (warning)  BT-120
+    at lines.1.exemption_reason
+    ...
+no output written
 ```
 
 Exit codes separate the two questions a caller has: `0` valid, `1` the invoice is
@@ -168,6 +206,9 @@ python3 -m venv .venv
 # Poland's FA(3); the same input also converts to UBL
 ./.venv/bin/einvoice validate examples/invoice-fa3.json --format fa3
 ./.venv/bin/einvoice convert examples/invoice-fa3.json --format fa3 -o invoice-fa3.xml
+
+# Invoiced in EUR, VAT reported in PLN
+./.venv/bin/einvoice convert examples/invoice-eur.json --format fa3
 ```
 
 `examples/invoice.json` is refused for FA(3), on purpose: it carries a document-level

@@ -88,6 +88,17 @@ def _errors(invoice: Invoice) -> list[ValidationIssue]:
                 "BT-120",
             ))
 
+    if invoice.currency != "PLN" and (
+        invoice.vat_accounting_currency != "PLN" or invoice.exchange_rate is None
+    ):
+        found.append(_issue(
+            Severity.ERROR, "FA3-EXCHANGE-RATE", "exchange_rate",
+            "a foreign-currency invoice must also state its VAT in PLN "
+            "(art. 106e(11)); give vat_accounting_currency PLN and the "
+            "exchange_rate used",
+            "BT-5", "BT-6",
+        ))
+
     if extras is not None and extras.margin_scheme:
         found.append(_issue(
             Severity.ERROR, "FA3-MARGIN-SCHEME", "extras.margin_scheme",
@@ -105,6 +116,14 @@ def _errors(invoice: Invoice) -> list[ValidationIssue]:
 
 def _warnings(invoice: Invoice) -> list[ValidationIssue]:
     found = []
+
+    if invoice.currency == "PLN" and invoice.vat_accounting_currency is not None:
+        found.append(_issue(
+            Severity.WARNING, "FA3-DROP-BT111", "vat_accounting_currency",
+            f"FA(3) states tax in PLN already, so the VAT total in "
+            f"{invoice.vat_accounting_currency} (BT-111) has nowhere to go",
+            "BT-6", "BT-111",
+        ))
 
     for role in ("seller", "buyer"):
         if getattr(invoice, role).legal_registration_id is not None:

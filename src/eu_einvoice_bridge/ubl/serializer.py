@@ -109,6 +109,25 @@ def _allowance_charge(parent, item: AllowanceCharge, currency: str) -> None:
     _tax_category(node, "TaxCategory", item.vat_category, item.vat_rate)
 
 
+def _accounting_tax_total(parent, invoice: Invoice) -> None:
+    """BT-111: a second TaxTotal, in the VAT accounting currency, without subtotals.
+
+    This is the shape the official examples use. The exchange rate itself is not
+    written anywhere: EN16931 records only the converted total.
+    """
+    total = invoice.totals.total_vat_in_accounting_currency
+    if total is None:
+        return
+    node = _el(parent, CAC, "TaxTotal")
+    _el(
+        node,
+        CBC,
+        "TaxAmount",
+        _amount(total),
+        currencyID=invoice.vat_accounting_currency,
+    )
+
+
 def _tax_total(parent, invoice: Invoice) -> None:
     node = _el(parent, CAC, "TaxTotal")
     _el(
@@ -207,6 +226,8 @@ def to_ubl(invoice: Invoice) -> bytes:
         _el(root, CBC, "DueDate", invoice.due_date.isoformat())
     _el(root, CBC, "InvoiceTypeCode", invoice.type_code.value)
     _el(root, CBC, "DocumentCurrencyCode", invoice.currency)
+    if invoice.vat_accounting_currency is not None:
+        _el(root, CBC, "TaxCurrencyCode", invoice.vat_accounting_currency)  # BT-6
 
     _party(root, "AccountingSupplierParty", invoice.seller)
     _party(root, "AccountingCustomerParty", invoice.buyer)
@@ -215,6 +236,7 @@ def to_ubl(invoice: Invoice) -> bytes:
         _allowance_charge(root, item, invoice.currency)
 
     _tax_total(root, invoice)
+    _accounting_tax_total(root, invoice)
     _monetary_total(root, invoice)
 
     for line in invoice.lines:

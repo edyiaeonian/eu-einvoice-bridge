@@ -9,7 +9,7 @@ from decimal import Decimal
 
 from lxml import etree
 
-from ..formatting import amount, price, quantity
+from ..formatting import amount, exchange_rate, price, quantity
 from ..model import ExemptionBasis, Invoice, LineItem, Party, PolishExtras, VatCategory
 from ..validate.issues import Severity, ValidationIssue
 from .checks import fa3_issues
@@ -90,16 +90,26 @@ def _buyer(root, party: Party, extras: PolishExtras) -> None:
     _el(buyer, "GV", _yes_no(extras.buyer_vat_group_member))
 
 
-def _buckets(invoice: Invoice) -> tuple[dict[str, Decimal], dict[str, Decimal]]:
-    """Net and tax per FA(3) slot. Distinct rates can share one (23% and 22%)."""
+def _buckets(
+    invoice: Invoice,
+) -> tuple[dict[str, Decimal], dict[str, Decimal], dict[str, Decimal]]:
+    """Net, tax and PLN tax per FA(3) slot. Distinct rates can share a slot.
+
+    PLN tax is summed from the model's per-group conversions, never converted
+    again here, so it adds up to exactly the BT-111 the UBL states.
+    """
     net: dict[str, Decimal] = {}
     tax: dict[str, Decimal] = {}
+    tax_pln: dict[str, Decimal] = {}
     for entry in invoice.vat_breakdown:
         slot = rate_slot(entry.category, entry.rate)
         net[slot.bucket] = net.get(slot.bucket, Decimal("0")) + entry.taxable_amount
         if slot.taxed:
             tax[slot.bucket] = tax.get(slot.bucket, Decimal("0")) + entry.tax_amount
-    return net, tax
+            converted = entry.tax_amount_in_accounting_currency
+            if converted is not None:
+                tax_pln[slot.bucket] = tax_pln.get(slot.bucket, Decimal("0")) + converted
+    return net, tax, tax_pln
 
 
 def _annotations(fa, invoice: Invoice, extras: PolishExtras) -> None:
@@ -131,7 +141,7 @@ def _annotations(fa, invoice: Invoice, extras: PolishExtras) -> None:
     _el(margin, "P_PMarzyN", "1")
 
 
-def _line(fa, position: int, line: LineItem) -> None:
+def _line(fa, position: int, line: LineItem, rate: Decimal | None) -> None:
     row = _el(fa, "FaWiersz")
     # NrWierszaFa must be a positive integer; BT-126 may be any text.
     _el(row, "NrWierszaFa", str(position))
@@ -141,6 +151,8 @@ def _line(fa, position: int, line: LineItem) -> None:
     _el(row, "P_9A", price(line.unit_price))
     _el(row, "P_11", amount(line.net_amount))
     _el(row, "P_12", rate_slot(line.vat_category, line.vat_rate).code)
+    if rate is not None:
+        _el(row, "KursWaluty", exchange_rate(rate))
 
 
 def _fa(root, invoice: Invoice, extras: PolishExtras) -> None:
@@ -149,12 +161,17 @@ def _fa(root, invoice: Invoice, extras: PolishExtras) -> None:
     _el(fa, "P_1", invoice.issue_date.isoformat())
     _el(fa, "P_2", invoice.number)
 
-    net, tax = _buckets(invoice)
+    net, tax, tax_pln = _buckets(invoice)
+    foreign = invoice.currency != "PLN"
     for bucket in BUCKET_ORDER:
         if bucket in net:
             _el(fa, f"P_13_{bucket}", amount(net[bucket]))
             if bucket in tax:
                 _el(fa, f"P_14_{bucket}", amount(tax[bucket]))
+                # Art. 106e(11): on a foreign-currency invoice the tax is also
+                # stated in PLN.
+                if foreign:
+                    _el(fa, f"P_14_{bucket}W", amount(tax_pln[bucket]))
 
     _el(fa, "P_15", amount(invoice.totals.total_with_vat))
     _annotations(fa, invoice, extras)
@@ -169,8 +186,9 @@ def _fa(root, invoice: Invoice, extras: PolishExtras) -> None:
             _el(extra, "Klucz", "Opis")
             _el(extra, "Wartosc", line.description)
 
+    line_rate = invoice.exchange_rate if foreign else None
     for position, line in enumerate(invoice.lines, start=1):
-        _line(fa, position, line)
+        _line(fa, position, line, line_rate)
 
     if invoice.prepaid_amount:
         # A prepayment leaves the tax base alone, which is exactly what

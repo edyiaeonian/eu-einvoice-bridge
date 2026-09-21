@@ -48,3 +48,5 @@ jobs:
           einvoice validate examples/invoice-fa3.json --format fa3
           einvoice convert examples/invoice-fa3.json --format fa3 -o /tmp/invoice-fa3.xml
           grep -q "http://crd.gov.pl/wzor/2025/06/25/13775/" /tmp/invoice-fa3.xml
+          einvoice validate examples/invoice-eur.json
+          einvoice validate examples/invoice-eur.json --format fa3

@@ -298,3 +298,24 @@ class TestFa3Output:
         # It exists to show the clean path, so it should stay clean.
         _, output = run(capsys, "validate", str(FA3_EXAMPLE), "--format", "fa3")
         assert "warning" not in output
+
+
+class TestMultiCurrency:
+    """Phase 2's last acceptance criterion, end to end through the CLI."""
+
+    EXAMPLE = EXAMPLES / "invoice-eur.json"
+
+    @pytest.mark.parametrize("fmt", ["ubl", "fa3"])
+    def test_the_eur_example_is_valid_in_both_formats(self, capsys, fmt):
+        code, output = run(capsys, "validate", str(self.EXAMPLE), "--format", fmt)
+        assert code == 0, output
+        assert "warning" not in output
+
+    def test_both_outputs_state_the_same_pln_tax(self, tmp_path, capsys):
+        ubl_out, fa3_out = tmp_path / "ubl.xml", tmp_path / "fa3.xml"
+        run(capsys, "convert", str(self.EXAMPLE), "-o", str(ubl_out))
+        run(capsys, "convert", str(self.EXAMPLE), "--format", "fa3", "-o", str(fa3_out))
+        assert b'currencyID="PLN">111.52<' in ubl_out.read_bytes()
+        fa3_xml = fa3_out.read_bytes()
+        assert b"<P_14_1W>97.90</P_14_1W>" in fa3_xml
+        assert b"<P_14_2W>13.62</P_14_2W>" in fa3_xml

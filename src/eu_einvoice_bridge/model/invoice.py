@@ -9,12 +9,12 @@ from pydantic import (
     Field,
     StringConstraints,
     computed_field,
-    field_validator,
+    model_validator,
 )
 
 from .enums import InvoiceTypeCode, VatCategory
 from .lines import AllowanceCharge, LineItem, VatRate
-from .numeric import MAX_DIGITS, Amount, money
+from .numeric import MAX_DIGITS, Amount, ExactDecimal, money
 from .parties import Party
 from .polish import PolishExtras
 
@@ -34,6 +34,10 @@ class VatBreakdownEntry(BaseModel):
     tax_amount: Amount
     exemption_reason: str | None = None
     exemption_reason_code: str | None = None
+    # Not an EN16931 business term. The group's tax converted to the VAT
+    # accounting currency, so BT-111 and FA(3)'s per-rate PLN amounts are built
+    # from the same rounded figures and cannot disagree.
+    tax_amount_in_accounting_currency: Amount | None = None
 
 
 class Totals(BaseModel):
@@ -49,6 +53,7 @@ class Totals(BaseModel):
     total_with_vat: Amount  # BT-112
     prepaid_amount: Amount  # BT-113
     amount_due: Amount  # BT-115
+    total_vat_in_accounting_currency: Amount | None = None  # BT-111
 
 
 def _reason_for_group(lines: list[LineItem]) -> tuple[str | None, str | None]:
@@ -74,6 +79,10 @@ class Invoice(BaseModel):
     type_code: InvoiceTypeCode  # BT-3
     currency: CurrencyCode  # BT-5
     vat_accounting_currency: CurrencyCode | None = None  # BT-6
+    # Units of BT-6 per unit of BT-5. EN16931 has no field for it -- it records
+    # only the converted total, BT-111 -- but both outputs need it to derive
+    # their amounts in the accounting currency.
+    exchange_rate: ExactDecimal | None = Field(default=None, gt=0, max_digits=MAX_DIGITS)
     due_date: date | None = None  # BT-9
     seller: Party
     buyer: Party
@@ -86,24 +95,30 @@ class Invoice(BaseModel):
     # by the FA(3) mapping, not here.
     extras: PolishExtras | None = None
 
-    @field_validator("vat_accounting_currency")
-    @classmethod
-    def _vat_accounting_currency_not_yet(cls, value: str | None) -> str | None:
-        """Refuse BT-6 until it can be emitted validly.
+    @model_validator(mode="after")
+    def _accounting_currency_needs_a_rate(self) -> Self:
+        """BT-6 and the exchange rate only make sense together.
 
-        BR-53 is fatal: once BT-6 is present, BT-111 -- the total VAT expressed
-        in that currency -- must be too, and computing it needs an exchange rate
-        this model does not carry. Accepting BT-6 would guarantee an invalid
-        invoice, so it is refused here instead: a mismatch that is certain to be
-        rejected downstream fails before anything is emitted.
+        BT-6 without a rate leaves BT-111 underivable, which BR-53 makes fatal; a
+        rate without BT-6 converts into nothing. And a VAT accounting currency
+        equal to the invoice currency would be a conversion to itself.
         """
-        if value is not None:
+        if self.vat_accounting_currency is not None and self.exchange_rate is None:
             raise ValueError(
-                "BT-6 (VAT accounting currency) is not supported yet: BR-53 then "
-                "requires BT-111, the VAT total in that currency, which needs an "
-                "exchange rate this model does not carry"
+                "exchange_rate is required when vat_accounting_currency (BT-6) is "
+                "given: BT-111 is derived from it"
             )
-        return value
+        if self.exchange_rate is not None and self.vat_accounting_currency is None:
+            raise ValueError(
+                "vat_accounting_currency (BT-6) is required when exchange_rate is "
+                "given: it names the currency the rate converts into"
+            )
+        if self.vat_accounting_currency == self.currency:
+            raise ValueError(
+                "vat_accounting_currency (BT-6) must differ from the invoice "
+                "currency (BT-5)"
+            )
+        return self
 
     @computed_field
     @cached_property
@@ -141,14 +156,20 @@ class Invoice(BaseModel):
                 + adjustments.get(key, Decimal("0"))
             )
             reason, reason_code = _reason_for_group(group) if group else (None, None)
+            tax = money(taxable * rate)
             entries.append(
                 VatBreakdownEntry(
                     category=category,
                     rate=rate,
                     taxable_amount=taxable,
-                    tax_amount=money(taxable * rate),
+                    tax_amount=tax,
                     exemption_reason=reason,
                     exemption_reason_code=reason_code,
+                    tax_amount_in_accounting_currency=(
+                        money(tax * self.exchange_rate)
+                        if self.exchange_rate is not None
+                        else None
+                    ),
                 )
             )
         return tuple(entries)
@@ -188,6 +209,17 @@ class Invoice(BaseModel):
             total_with_vat=with_vat,
             prepaid_amount=money(self.prepaid_amount),
             amount_due=money(with_vat - self.prepaid_amount),
+            # Summed from the per-group conversions rather than converting the
+            # total: the two can differ by a cent, and FA(3) states PLN tax per
+            # rate, so this keeps both documents stating the same figure.
+            total_vat_in_accounting_currency=(
+                sum(
+                    (e.tax_amount_in_accounting_currency for e in self.vat_breakdown),
+                    Decimal("0.00"),
+                )
+                if self.exchange_rate is not None
+                else None
+            ),
         )
 
     def model_post_init(self, __context) -> None:
