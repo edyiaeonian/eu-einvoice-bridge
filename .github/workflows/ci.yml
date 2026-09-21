@@ -50,3 +50,5 @@ jobs:
           grep -q "http://crd.gov.pl/wzor/2025/06/25/13775/" /tmp/invoice-fa3.xml
           einvoice validate examples/invoice-eur.json
           einvoice validate examples/invoice-eur.json --format fa3
+          # submit needs the KSeF sandbox, so CI only checks that it loads.
+          einvoice submit --help > /dev/null

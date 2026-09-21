@@ -4,6 +4,11 @@ Exit codes distinguish the two things a caller cares about: 1 means the invoice
 was read but is not acceptable, 2 means it could not be read at all. Conflating
 them would make the difference between "fix your invoice" and "fix your file"
 invisible to a script.
+
+submit adds two more: 3 means KSeF is still processing the invoice (run the
+same command again to pick it up), 4 means the submission itself failed --
+KSeF refused the session, the network went away, or a previous send cannot be
+accounted for.
 """
 
 import argparse
@@ -22,6 +27,8 @@ from .report import format_issues, format_success, issues_from_pydantic
 EXIT_OK = 0
 EXIT_INVALID = 1
 EXIT_UNREADABLE = 2
+EXIT_PENDING = 3
+EXIT_SUBMISSION_FAILED = 4
 
 
 class InputError(Exception):
@@ -115,6 +122,96 @@ def _convert_command(args) -> int:
     return EXIT_OK
 
 
+def _seller_for(invoice: Invoice, nip: str, substitute: bool) -> Invoice | None:
+    """KSeF TEST accepts an invoice only from the NIP that authenticated."""
+    wanted = f"PL{nip}"
+    if invoice.seller.vat_id == wanted:
+        return invoice
+    if not substitute:
+        return None
+    seller = invoice.seller.model_copy(update={"vat_id": wanted})
+    return invoice.model_copy(update={"seller": seller})
+
+
+def _submit_command(args) -> int:
+    # Imported here so validate and convert never load the network stack.
+    import hashlib
+
+    import httpx
+
+    from .. import ksef
+
+    path = Path(args.input)
+    try:
+        invoice = _load(path)
+    except ValidationError as exc:
+        print(format_issues(path.name, issues_from_pydantic(exc)), end="")
+        return EXIT_INVALID
+
+    identity_dir = Path(args.identity_dir)
+    identity = ksef.load_identity(identity_dir)
+    if identity is None:
+        identity = ksef.create_test_identity()
+        ksef.save_identity(identity, identity_dir)
+        print(
+            f"created a self-signed KSeF TEST identity for NIP {identity.nip} in {identity_dir}/",
+            file=sys.stderr,
+        )
+
+    submitted = _seller_for(invoice, identity.nip, args.test_seller)
+    if submitted is None:
+        print(
+            f"{path.name}: seller.vat_id is {invoice.seller.vat_id}, but the test identity "
+            f"is PL{identity.nip}; KSeF only accepts invoices from the NIP that "
+            f"authenticated. Pass --test-seller to substitute it.",
+            file=sys.stderr,
+        )
+        return EXIT_INVALID
+    invoice = submitted
+    xml, issues = _fa3_chain(invoice)
+    if has_errors(issues):
+        print(format_issues(path.name, issues), end="", flush=True)
+        print("not submitted", file=sys.stderr)
+        return EXIT_INVALID
+    if issues:
+        print(format_issues(path.name, issues), end="", file=sys.stderr)
+
+    source_hash = hashlib.sha256(invoice.model_dump_json().encode()).hexdigest()
+    store = ksef.StateStore(Path(args.state_dir), clock=lambda: datetime.now(timezone.utc))
+    polling = ksef.Polling(timeout_seconds=args.timeout)
+    try:
+        with httpx.Client(base_url=ksef.TEST_BASE_URL, timeout=30.0) as http:
+            record = ksef.submit(
+                invoice.number,
+                source_hash,
+                lambda: xml,
+                client=ksef.KsefClient(http),
+                identity=identity,
+                store=store,
+                polling=polling,
+            )
+    except (ksef.SubmissionError, ksef.KsefError) as exc:
+        print(f"{path.name}: {exc}", file=sys.stderr)
+        return EXIT_SUBMISSION_FAILED
+
+    if record.status == "accepted":
+        print(
+            f"{path.name}: accepted by KSeF TEST\n"
+            f"  KSeF number: {record.ksef_number}\n"
+            f"  UPO:         {record.upo_path}"
+        )
+        return EXIT_OK
+    if record.status == "rejected":
+        print(f"{path.name}: rejected by KSeF TEST\n  {record.error}")
+        return EXIT_INVALID
+    print(
+        f"{path.name}: sent, still processing after {args.timeout:g}s "
+        f"(session {record.session_reference}); run the same command again to check",
+        file=sys.stderr,
+    )
+    return EXIT_PENDING
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="einvoice",
@@ -147,6 +244,29 @@ def build_parser() -> argparse.ArgumentParser:
     convert.add_argument("-o", "--output", help="write here instead of stdout")
     add_format(convert)
     convert.set_defaults(handler=_convert_command)
+
+    send = subcommands.add_parser(
+        "submit",
+        help="send the invoice as FA(3) to KSeF's TEST environment and fetch its UPO",
+    )
+    send.add_argument("input", help="invoice JSON file")
+    send.add_argument(
+        "--state-dir", default="state", help="where submission records and UPOs go (default: state)"
+    )
+    send.add_argument(
+        "--identity-dir",
+        default="certs",
+        help="the self-signed test identity; created here if missing (default: certs)",
+    )
+    send.add_argument(
+        "--test-seller",
+        action="store_true",
+        help="replace the seller's NIP with the test identity's",
+    )
+    send.add_argument(
+        "--timeout", type=float, default=120.0, help="seconds to wait for KSeF's verdict (default: 120)"
+    )
+    send.set_defaults(handler=_submit_command)
 
     return parser
 
