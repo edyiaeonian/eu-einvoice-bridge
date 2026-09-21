@@ -7,9 +7,10 @@ class Severity(StrEnum):
     WARNING = "warning"
 
 
-# Structural problems are the likelier root cause, and a semantic rule firing on
-# a malformed document is usually noise, so they are reported first.
-SOURCE_ORDER = {"xml": 0, "xsd": 1, "schematron": 2}
+# Ordered by the stage that found them. Mapping problems exist before any XML
+# does; after that, a structural problem is the likelier root cause, and a
+# semantic rule firing on a malformed document is usually noise.
+SOURCE_ORDER = {"mapping": 0, "xml": 1, "xsd": 2, "schematron": 3}
 
 SEVERITY_ORDER = {Severity.ERROR: 0, Severity.WARNING: 1}
 

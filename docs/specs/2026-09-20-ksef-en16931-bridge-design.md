@@ -441,6 +441,27 @@ amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 | 免稅理由代碼 BT-121 | 無代碼欄位,FA(3) 要法源文字(`P_19A/B/C`)| 第 3 類;若只有代碼、沒有文字,則為第 4 類 |
 | 多幣別稅額 | 各稅率 `P_14_xW`(換算為 PLN 的稅額),明細 `KursWaluty`(匯率)| 階段二最後一步 |
 
+### 落差回報的規則 ID
+
+`fa3_issues()` 在產生任何 XML 之前檢查整張發票,一次回傳全部問題,來源標為 `mapping`。規則 ID 以 `FA3-` 開頭,與官方的 `BR-` 規則區分。XSD 本身就會檢查的格式限制(例如小數位數)不在此重述,交由產出後的 XSD 驗證。
+
+| 規則 ID | 嚴重度 | 情況 |
+|---|---|---|
+| `FA3-NO-DECLARATIONS` | 錯誤 | 缺少 `PolishExtras` |
+| `FA3-SELLER-NIP` | 錯誤 | 賣方沒有 `PL` 開頭的 VAT 號 |
+| `FA3-DOC-ALLOWANCE` | 錯誤 | 有文件層級折讓或附加費(影響稅基,不能捨棄) |
+| `FA3-RATE` | 錯誤 | 稅別與稅率組合在 FA(3) 沒有代碼 |
+| `FA3-EXEMPTION-BASIS` | 錯誤 | 有免稅明細但未說明法源類型 |
+| `FA3-EXEMPTION-TEXT` | 錯誤 | 免稅明細只有理由代碼、沒有法源文字 |
+| `FA3-MARGIN-SCHEME` | 錯誤 | 聲明為毛利課稅制度(不支援) |
+| `FA3-NEW-TRANSPORT` | 錯誤 | 聲明為新交通工具的歐盟境內供應(不支援) |
+| `FA3-DROP-BT30` | 警告 | 法人登記號被捨棄 |
+| `FA3-DROP-LINE-ID` | 警告 | 明細 ID 不等於其順序,改以順序編號 |
+| `FA3-DROP-BT121` | 警告 | 免稅理由代碼被捨棄 |
+| `FA3-DROP-REASON` | 警告 | 以代碼表示的稅別(`AE`、`K`、`G`),其理由文字被捨棄 |
+
+`to_fa3()` 一開始即執行這些檢查,有任何錯誤就以 `Fa3MappingError` 帶著**全部**錯誤拒絕輸出;警告不阻擋輸出,由呼叫端另行回報。
+
 ---
 
 ## 8. 驗證鏈

@@ -11,6 +11,8 @@ from lxml import etree
 
 from ..formatting import amount, price, quantity
 from ..model import ExemptionBasis, Invoice, LineItem, Party, PolishExtras, VatCategory
+from ..validate.issues import Severity, ValidationIssue
+from .checks import fa3_issues
 from .mapping import BUCKET_ORDER, FA3_NS, eu_vat_prefixes, rate_slot
 
 _BASIS_ELEMENT = {
@@ -21,7 +23,15 @@ _BASIS_ELEMENT = {
 
 
 class Fa3MappingError(ValueError):
-    """The invoice holds something FA(3) cannot express faithfully."""
+    """The invoice holds something FA(3) cannot express faithfully.
+
+    Carries every blocking issue, not only the first, so a caller can report
+    them all in one pass.
+    """
+
+    def __init__(self, issues: list[ValidationIssue]):
+        self.issues = tuple(issues)
+        super().__init__("; ".join(f"{i.rule_id}: {i.message}" for i in self.issues))
 
 
 def _el(parent, name: str, text: str | None = None, **attrs):
@@ -52,8 +62,6 @@ def _address(parent, party: Party) -> None:
 
 
 def _seller(root, party: Party) -> None:
-    if party.vat_id is None or not party.vat_id.startswith("PL"):
-        raise Fa3MappingError("FA(3) requires the seller's Polish NIP")
     seller = _el(root, "Podmiot1")
     ids = _el(seller, "DaneIdentyfikacyjne")
     _el(ids, "NIP", party.vat_id[2:])
@@ -88,11 +96,6 @@ def _buckets(invoice: Invoice) -> tuple[dict[str, Decimal], dict[str, Decimal]]:
     tax: dict[str, Decimal] = {}
     for entry in invoice.vat_breakdown:
         slot = rate_slot(entry.category, entry.rate)
-        if slot is None:
-            raise Fa3MappingError(
-                f"FA(3) has no code for VAT category {entry.category.value} "
-                f"at rate {entry.rate}"
-            )
         net[slot.bucket] = net.get(slot.bucket, Decimal("0")) + entry.taxable_amount
         if slot.taxed:
             tax[slot.bucket] = tax.get(slot.bucket, Decimal("0")) + entry.tax_amount
@@ -116,23 +119,14 @@ def _annotations(fa, invoice: Invoice, extras: PolishExtras) -> None:
     if exempt is None:
         _el(exemption, "P_19N", "1")
     else:
-        if extras.exemption_basis is None or exempt.exemption_reason is None:
-            raise Fa3MappingError(
-                "an exempt invoice needs the exemption's legal basis as text and "
-                "which kind of provision it is"
-            )
         _el(exemption, "P_19", "1")
         _el(exemption, _BASIS_ELEMENT[extras.exemption_basis], exempt.exemption_reason)
 
-    if extras.intra_eu_new_means_of_transport:
-        raise Fa3MappingError("new means of transport are not supported")
     transport = _el(notes, "NoweSrodkiTransportu")
     _el(transport, "P_22N", "1")
 
     _el(notes, "P_23", _yes_no(extras.simplified_triangular_procedure))
 
-    if extras.margin_scheme:
-        raise Fa3MappingError("margin schemes are not supported")
     margin = _el(notes, "PMarzy")
     _el(margin, "P_PMarzyN", "1")
 
@@ -195,22 +189,19 @@ def _fa(root, invoice: Invoice, extras: PolishExtras) -> None:
 
 
 def to_fa3(invoice: Invoice, *, generated_at: datetime) -> bytes:
-    """Render an invoice as FA(3) XML.
+    """Render an invoice as FA(3) XML, or raise with every blocking issue.
 
     generated_at fills DataWytworzeniaFa. It is passed in rather than read from
     the clock so the same invoice always renders to the same bytes.
     """
     if generated_at.tzinfo is None:
         raise ValueError("generated_at must be timezone-aware")
-    if invoice.extras is None:
-        raise Fa3MappingError("FA(3) requires the Polish statutory declarations")
-    if invoice.allowance_charges:
-        # These lower the tax base (BR-S-08); FA(3)'s Rozliczenie only adjusts
-        # the payable amount, so carrying them would misstate the tax.
-        raise Fa3MappingError(
-            "FA(3) has no document-level allowance or charge that affects the "
-            "tax base"
-        )
+
+    # Everything below assumes a mappable invoice; this is what makes it so.
+    # Warnings do not block and are the caller's to report via fa3_issues().
+    blocking = [i for i in fa3_issues(invoice) if i.severity is Severity.ERROR]
+    if blocking:
+        raise Fa3MappingError(blocking)
 
     root = etree.Element(f"{{{FA3_NS}}}Faktura", nsmap={None: FA3_NS})
     _header(root, generated_at)
