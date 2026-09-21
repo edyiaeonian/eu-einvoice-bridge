@@ -7,12 +7,12 @@ syntax, and the **FA(3)** XML that Poland's KSeF requires.
 
 | Phase | Scope | Status |
 |---|---|---|
-| 1 | Neutral model, UBL serializer, validation chain, CLI error report | 🚧 in progress |
+| 1 | Neutral model, UBL serializer, validation chain, CLI error report | ✅ complete |
 | 2 | FA(3) serializer, mismatch handling | planned |
 | 3 | Encryption, KSeF client, UPO retrieval | planned |
 
-The architecture below describes the finished shape. Modules from later phases are not
-in the tree yet. See [the phase 1 plan](docs/plans/2026-09-20-phase1-implementation-plan.md).
+The architecture below describes the finished shape; `crypto` and `ksef` arrive in
+phase 3. See [the phase 1 plan](docs/plans/2026-09-20-phase1-implementation-plan.md).
 
 ---
 
@@ -64,6 +64,49 @@ carries an exchange rate field (`KursWaluty`) that EN16931 has no slot for, whil
 EN16931 expresses the same requirement as a separate VAT accounting currency (BT-6).
 One requirement, two unrelated shapes: case 1 and case 2 in the same field.
 
+## What it looks like
+
+With no UI, the error report is the product surface. It shows everything wrong at
+once — never one problem per run — and each entry names the rule, the business
+terms it constrains, and where to look.
+
+Deleting one field, the seller's VAT identifier, breaks three separate rules:
+
+```
+$ einvoice validate invoice.json
+invoice.json: 3 problems
+
+business rules (3 errors)
+  BR-AE-02  BG-25, BT-151, BT-31, BT-32, BT-63, BT-48, BT-47
+    at /Invoice
+    An Invoice that contains an Invoice line (BG-25) where the Invoiced item VAT
+    category code (BT-151) is "Reverse charge" shall contain the Seller VAT
+    Identifier (BT-31), ... and the Buyer VAT identifier (BT-48) ...
+  BR-S-02  BG-25, BT-151, BT-31, BT-32, BT-63
+    at /Invoice
+    ...
+  BR-S-03  BG-20, BT-95, BT-31, BT-32, BT-63
+    at /Invoice
+    ...
+```
+
+That invoice is accepted by the model — no single field is wrong. It is the
+document as a whole that breaks the rules, which is the division of labour between
+the two: the model refuses states that are meaningless on their own, Schematron
+knows rules that span the whole invoice.
+
+A valid one:
+
+```
+$ einvoice validate invoice.json
+invoice.json: valid
+  EN16931 (UBL 2.1), 2 lines, VAT categories AE, S
+  total 710.70 PLN, due 610.70 PLN
+```
+
+Exit codes separate the two questions a caller has: `0` valid, `1` the invoice is
+wrong, `2` the file could not be read at all.
+
 ## Architecture
 
 ```
@@ -105,6 +148,9 @@ Requires Python 3.12+.
 python3 -m venv .venv
 ./.venv/bin/pip install -e ".[dev]"
 ./.venv/bin/pytest
+
+./.venv/bin/einvoice validate examples/invoice.json
+./.venv/bin/einvoice convert examples/invoice.json -o invoice.xml
 ```
 
 Tests run fully offline, including the Schematron validation, because the official
@@ -118,25 +164,34 @@ credentials setup they require:
 ./.venv/bin/pytest -m integration    # phase 3
 ```
 
-### Troubleshooting: editable install on macOS with Python 3.14
+### Troubleshooting: keep the venv out of iCloud Drive
 
-If `import eu_einvoice_bridge` fails outside pytest even though `pip list` shows the
-package installed, check the flags on its `.pth` file:
+If the `einvoice` command fails with `ModuleNotFoundError` even though `pip list`
+shows the package installed, the venv is probably inside an iCloud-synced folder —
+on macOS, Desktop and Documents are synced by default.
+
+Three things line up to produce a silent failure:
+
+1. iCloud marks the `.venv` directory with the BSD `UF_HIDDEN` flag, and the flag
+   spreads to files inside it
+2. Python 3.14's `site.py` skips hidden `.pth` files
+3. An editable install *is* a `.pth` file, so the package silently stops resolving
+
+Nothing reports an error at any step. `chflags nohidden .venv/lib/*/site-packages/*.pth`
+clears it, but iCloud re-applies the flag within minutes, so the fix is to put the
+venv somewhere that is not synced:
 
 ```bash
-ls -lO .venv/lib/python3.14/site-packages/_editable_impl_eu_einvoice_bridge.pth
+python3 -m venv ~/.virtualenvs/eu-einvoice-bridge
+~/.virtualenvs/eu-einvoice-bridge/bin/pip install -e ".[dev]"
 ```
 
-macOS marks files inside a venv with the BSD `UF_HIDDEN` flag, and Python 3.14's
-`site.py` skips hidden `.pth` files — silently, with no error anywhere. Clear it:
+Syncing a virtualenv is a bad idea regardless — thousands of files, none of them
+worth keeping.
 
-```bash
-chflags nohidden .venv/lib/python3.14/site-packages/*.pth
-```
-
-The test suite is unaffected: `pythonpath = ["src"]` in `pyproject.toml` puts the
-source tree on `sys.path` directly, so tests never depend on the editable install
-taking effect.
+The test suite is unaffected either way: `pythonpath = ["src"]` in `pyproject.toml`
+puts the source tree on `sys.path` directly, so tests never depend on the editable
+install resolving.
 
 ## Documentation
 

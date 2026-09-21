@@ -1,0 +1,64 @@
+{
+  "number": "FV/2026/001",
+  "issue_date": "2026-09-21",
+  "due_date": "2026-10-21",
+  "type_code": "380",
+  "currency": "PLN",
+  "seller": {
+    "name": "Acme sp. z o.o.",
+    "legal_registration_id": "0000123456",
+    "vat_id": "PL5555555555",
+    "vat_scheme": "PL",
+    "address": {
+      "street": "ul. Marszalkowska 1",
+      "city": "Warszawa",
+      "postal_code": "00-001",
+      "country": "PL"
+    }
+  },
+  "buyer": {
+    "name": "Buyer sp. z o.o.",
+    "vat_id": "PL1111111111",
+    "vat_scheme": "PL",
+    "address": {
+      "street": "ul. Prosta 2",
+      "city": "Krakow",
+      "postal_code": "30-001",
+      "country": "PL"
+    }
+  },
+  "lines": [
+    {
+      "line_id": "1",
+      "name": "Widget",
+      "description": "A useful widget",
+      "quantity": "2",
+      "unit_code": "C62",
+      "unit_price": "50.00",
+      "net_amount": "100.00",
+      "vat_category": "S",
+      "vat_rate": "0.23"
+    },
+    {
+      "line_id": "2",
+      "name": "Consulting",
+      "quantity": "4",
+      "unit_code": "HUR",
+      "unit_price": "150.00",
+      "net_amount": "600.00",
+      "vat_category": "AE",
+      "vat_rate": "0",
+      "exemption_reason": "Reverse charge"
+    }
+  ],
+  "allowance_charges": [
+    {
+      "is_charge": false,
+      "amount": "10.00",
+      "vat_category": "S",
+      "vat_rate": "0.23",
+      "reason": "Volume discount"
+    }
+  ],
+  "prepaid_amount": "100.00"
+}

@@ -114,7 +114,7 @@ class TestLineItemExemptionReason:
     )
     def test_rejected_when_a_required_reason_is_missing(self, category):
         # BR-E-10 / BR-AE-10 / BR-G-10 / BR-IC-10
-        with pytest.raises(ValidationError, match="requires an exemption reason"):
+        with pytest.raises(ValidationError, match="exemption_reason: .* requires one"):
             a_line(vat_category=category, vat_rate=Decimal("0"))
 
     def test_reason_text_alone_is_enough(self):
@@ -144,7 +144,7 @@ class TestLineItemExemptionReason:
     )
     def test_rejected_when_a_forbidden_reason_is_present(self, category, rate):
         # BR-S-10 / BR-Z-10 — the constraint runs in both directions.
-        with pytest.raises(ValidationError, match="must not carry an exemption reason"):
+        with pytest.raises(ValidationError, match="exemption_reason: .* must not carry one"):
             a_line(
                 vat_category=category,
                 vat_rate=rate,

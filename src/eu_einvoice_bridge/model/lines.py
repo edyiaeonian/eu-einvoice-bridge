@@ -15,11 +15,13 @@ def _check_category_rate(category: VatCategory, rate: Decimal) -> None:
     """BR-S-05 against BR-Z/E/AE/G/IC-05, and the same for allowances/charges."""
     if category.requires_positive_rate and rate <= 0:
         raise ValueError(
-            f"VAT category {category.value} requires a rate greater than zero"
+            f"vat_rate: VAT category {category.value} requires a rate "
+            f"greater than zero"
         )
     if not category.requires_positive_rate and rate != 0:
         raise ValueError(
-            f"VAT category {category.value} requires a rate of zero, got {rate}"
+            f"vat_rate: VAT category {category.value} requires a rate of zero, "
+            f"got {rate}"
         )
 
 
@@ -32,12 +34,12 @@ def _check_exemption_reason(
 
     if category.requires_exemption_reason and not has_reason:
         raise ValueError(
-            f"VAT category {category.value} requires an exemption reason: "
+            f"exemption_reason: VAT category {category.value} requires one; "
             f"give exemption_reason (BT-120) or exemption_reason_code (BT-121)"
         )
     if not category.requires_exemption_reason and has_reason:
         raise ValueError(
-            f"VAT category {category.value} must not carry an exemption reason "
+            f"exemption_reason: VAT category {category.value} must not carry one "
             f"(BT-120/BT-121)"
         )
 
