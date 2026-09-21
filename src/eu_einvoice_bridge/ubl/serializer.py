@@ -10,7 +10,8 @@ from decimal import Decimal
 
 from lxml import etree
 
-from ..model import AllowanceCharge, Invoice, LineItem, Party, VatCategory
+from ..model import AllowanceCharge, Invoice, LineItem, Party, VatCategory, money
+from ..model.numeric import CENTS
 
 INVOICE_NS = "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
 CAC = "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
@@ -34,8 +35,35 @@ def _el(parent, ns: str, name: str, text: str | None = None, **attrs):
 
 
 def _amount(value: Decimal) -> str:
-    """Amounts are already rounded by the model; render them at two decimals."""
-    return f"{value:.2f}"
+    """Render a monetary amount without rounding it.
+
+    f"{value:.2f}" looks harmless but rounds with the context default,
+    ROUND_HALF_EVEN, quietly undoing the half-up policy the model applies:
+    10.005 would come out as 10.00. Rounding is the model's job, and every
+    amount reaching here is already exact to the cent, so anything else is a
+    bug upstream and is raised rather than papered over.
+    """
+    exact = money(value)
+    if exact != value:
+        raise ValueError(
+            f"amount {value} has more than two decimals; the model should have "
+            f"refused it before serialization"
+        )
+    return f"{exact:f}"
+
+
+def _price(value: Decimal) -> str:
+    """Render BT-146 at its full precision.
+
+    Unit price has no decimal limit in EN16931, so 0.125 is a legitimate price
+    and must survive as 0.125. Squeezing it to two decimals would lose data that
+    no downstream rule would ever notice. Prices with fewer than two decimals
+    are padded to two for readability; padding adds zeros and never rounds.
+    """
+    normalized = value.normalize()
+    if normalized.as_tuple().exponent > -2:
+        normalized = normalized.quantize(CENTS)
+    return f"{normalized:f}"
 
 
 def _percent(rate: Decimal) -> str:
@@ -64,8 +92,9 @@ def _tax_category(
 
     The exemption reason is passed explicitly rather than read off whatever
     object arrives, because it belongs in only one of the three places a tax
-    category appears: UBL-CR-601 forbids it on a line's ClassifiedTaxCategory,
-    and it is the VAT breakdown that carries BT-120/BT-121.
+    category appears: the VAT breakdown carries BT-120/BT-121, and UBL-CR-601 --
+    a warning-level rule -- says a line's ClassifiedTaxCategory should not.
+    Keeping to the warning keeps this serializer's output free of warnings too.
     """
     node = _el(parent, CAC, element_name)
     _el(node, CBC, "ID", category.value)
@@ -193,11 +222,12 @@ def _invoice_line(parent, line: LineItem, currency: str) -> None:
     if line.description is not None:
         _el(item, CBC, "Description", line.description)
     _el(item, CBC, "Name", line.name)
-    # No exemption reason here: UBL-CR-601 forbids it at line level.
+    # No exemption reason here: UBL-CR-601 (a warning) says it should not
+    # appear at line level.
     _tax_category(item, "ClassifiedTaxCategory", line.vat_category, line.vat_rate)
 
     price = _el(node, CAC, "Price")
-    _el(price, CBC, "PriceAmount", _amount(line.unit_price), currencyID=currency)
+    _el(price, CBC, "PriceAmount", _price(line.unit_price), currencyID=currency)
 
 
 def to_ubl(invoice: Invoice) -> bytes:
@@ -211,8 +241,6 @@ def to_ubl(invoice: Invoice) -> bytes:
         _el(root, CBC, "DueDate", invoice.due_date.isoformat())
     _el(root, CBC, "InvoiceTypeCode", invoice.type_code.value)
     _el(root, CBC, "DocumentCurrencyCode", invoice.currency)
-    if invoice.vat_accounting_currency is not None:
-        _el(root, CBC, "TaxCurrencyCode", invoice.vat_accounting_currency)
 
     _party(root, "AccountingSupplierParty", invoice.seller)
     _party(root, "AccountingCustomerParty", invoice.buyer)

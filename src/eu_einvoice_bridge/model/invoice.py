@@ -3,11 +3,18 @@ from decimal import Decimal
 from functools import cached_property
 from typing import Annotated, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, computed_field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    computed_field,
+    field_validator,
+)
 
 from .enums import InvoiceTypeCode, VatCategory
 from .lines import AllowanceCharge, LineItem, VatRate
-from .numeric import ExactDecimal, money
+from .numeric import Amount, money
 from .parties import Party
 
 CurrencyCode = Annotated[
@@ -22,8 +29,8 @@ class VatBreakdownEntry(BaseModel):
 
     category: VatCategory
     rate: VatRate
-    taxable_amount: ExactDecimal
-    tax_amount: ExactDecimal
+    taxable_amount: Amount
+    tax_amount: Amount
     exemption_reason: str | None = None
     exemption_reason_code: str | None = None
 
@@ -33,14 +40,14 @@ class Totals(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    sum_line_net: ExactDecimal  # BT-106
-    allowances_total: ExactDecimal  # BT-107
-    charges_total: ExactDecimal  # BT-108
-    total_without_vat: ExactDecimal  # BT-109
-    total_vat: ExactDecimal  # BT-110
-    total_with_vat: ExactDecimal  # BT-112
-    prepaid_amount: ExactDecimal  # BT-113
-    amount_due: ExactDecimal  # BT-115
+    sum_line_net: Amount  # BT-106
+    allowances_total: Amount  # BT-107
+    charges_total: Amount  # BT-108
+    total_without_vat: Amount  # BT-109
+    total_vat: Amount  # BT-110
+    total_with_vat: Amount  # BT-112
+    prepaid_amount: Amount  # BT-113
+    amount_due: Amount  # BT-115
 
 
 def _reason_for_group(lines: list[LineItem]) -> tuple[str | None, str | None]:
@@ -71,7 +78,26 @@ class Invoice(BaseModel):
     buyer: Party
     lines: list[LineItem] = Field(min_length=1)
     allowance_charges: list[AllowanceCharge] = Field(default_factory=list)
-    prepaid_amount: ExactDecimal = Field(default=Decimal("0.00"), ge=0)  # BT-113
+    prepaid_amount: Amount = Field(default=Decimal("0.00"), ge=0)  # BT-113, BR-DEC-16
+
+    @field_validator("vat_accounting_currency")
+    @classmethod
+    def _vat_accounting_currency_not_yet(cls, value: str | None) -> str | None:
+        """Refuse BT-6 until it can be emitted validly.
+
+        BR-53 is fatal: once BT-6 is present, BT-111 -- the total VAT expressed
+        in that currency -- must be too, and computing it needs an exchange rate
+        this model does not carry. Accepting BT-6 would guarantee an invalid
+        invoice, so it is refused here instead: a mismatch that is certain to be
+        rejected downstream fails before anything is emitted.
+        """
+        if value is not None:
+            raise ValueError(
+                "BT-6 (VAT accounting currency) is not supported yet: BR-53 then "
+                "requires BT-111, the VAT total in that currency, which needs an "
+                "exchange rate this model does not carry"
+            )
+        return value
 
     @computed_field
     @cached_property

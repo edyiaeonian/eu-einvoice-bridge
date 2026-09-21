@@ -4,7 +4,7 @@ from typing import Annotated, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .enums import VatCategory
-from .numeric import ExactDecimal
+from .numeric import Amount, ExactDecimal
 
 # Rates are fractions: 0.23 means 23%. The upper bound catches the percentage
 # mistake -- 23 would otherwise compute 2300% tax without complaint.
@@ -55,7 +55,7 @@ class LineItem(BaseModel):
     quantity: ExactDecimal = Field(ge=0)
     unit_code: str = Field(min_length=1)
     unit_price: ExactDecimal = Field(ge=0)
-    net_amount: ExactDecimal = Field(ge=0)
+    net_amount: Amount = Field(ge=0)  # BR-DEC-23
     vat_category: VatCategory
     vat_rate: VatRate
     # Held on the line so the VAT breakdown can be derived rather than supplied.
@@ -79,7 +79,7 @@ class AllowanceCharge(BaseModel):
     is_charge: bool
     # Always positive: direction is carried by is_charge, never by the sign, so
     # that a sign error cannot quietly turn a discount into a surcharge.
-    amount: ExactDecimal = Field(ge=0)
+    amount: Amount = Field(ge=0)  # BR-DEC-01 / BR-DEC-05
     vat_category: VatCategory
     vat_rate: VatRate
     reason: str | None = None

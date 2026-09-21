@@ -5,12 +5,19 @@ as a contract: every problem at once, each one naming a rule, a field and a
 place to look.
 """
 
+import importlib
 import json
 from decimal import Decimal
 
 import pytest
 
 from eu_einvoice_bridge.cli import main
+from eu_einvoice_bridge.validate import Severity, ValidationIssue
+
+# The cli package re-exports the main() function under the same name, so the
+# dotted path eu_einvoice_bridge.cli.main resolves to the function, not the
+# module. Patching needs the module itself.
+cli_main = importlib.import_module("eu_einvoice_bridge.cli.main")
 
 VALID_INVOICE = {
     "number": "FV/2026/001",
@@ -178,3 +185,39 @@ class TestExitCodes:
     ):
         code, _ = run(capsys, "validate", write(tmp_path, payload))
         assert code == expected
+
+
+class TestWarningsDoNotFail:
+    """Only fatal rules decide the outcome; warnings are shown, not enforced.
+
+    The serializer never produces a warning on its own, so the validator is
+    replaced with one that reports a single warning-level rule.
+    """
+
+    WARNING = ValidationIssue(
+        source="schematron",
+        severity=Severity.WARNING,
+        rule_id="UBL-CR-601",
+        location="/Invoice/cac:InvoiceLine/cac:Item/cac:ClassifiedTaxCategory",
+        message="A UBL invoice should not include the InvoiceLine Item "
+        "ClassifiedTaxCategory TaxExemptionReason",
+    )
+
+    @pytest.fixture(autouse=True)
+    def only_a_warning(self, monkeypatch):
+        monkeypatch.setattr(cli_main, "validate_ubl", lambda xml: [self.WARNING])
+
+    def test_validate_exits_zero_and_shows_the_warning(self, tmp_path, capsys):
+        code, output = run(capsys, "validate", write(tmp_path, VALID_INVOICE))
+        assert code == 0
+        assert "valid, 1 warning" in output
+        assert "UBL-CR-601" in output
+
+    def test_convert_still_writes_the_file(self, tmp_path, capsys):
+        out = tmp_path / "invoice.xml"
+        code, output = run(
+            capsys, "convert", write(tmp_path, VALID_INVOICE), "-o", str(out)
+        )
+        assert code == 0
+        assert out.exists()
+        assert "UBL-CR-601" in output

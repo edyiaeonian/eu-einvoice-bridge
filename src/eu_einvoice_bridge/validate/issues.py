@@ -11,6 +11,17 @@ class Severity(StrEnum):
 # a malformed document is usually noise, so they are reported first.
 SOURCE_ORDER = {"xml": 0, "xsd": 1, "schematron": 2}
 
+SEVERITY_ORDER = {Severity.ERROR: 0, Severity.WARNING: 1}
+
+
+def has_errors(issues) -> bool:
+    """Whether anything found makes the invoice unacceptable.
+
+    Warnings are reported but never decide the outcome; that is what separates
+    them from errors in the official rules.
+    """
+    return any(issue.severity is Severity.ERROR for issue in issues)
+
 
 @dataclass(frozen=True, slots=True)
 class ValidationIssue:
@@ -29,8 +40,12 @@ class ValidationIssue:
     line: int | None = None
 
     @property
-    def sort_key(self) -> tuple[int, str]:
-        return (SOURCE_ORDER.get(self.source, 99), self.rule_id or "")
+    def sort_key(self) -> tuple[int, int, str]:
+        return (
+            SOURCE_ORDER.get(self.source, 99),
+            SEVERITY_ORDER[self.severity],
+            self.rule_id or "",
+        )
 
     def __str__(self) -> str:
         label = self.rule_id or self.source.upper()

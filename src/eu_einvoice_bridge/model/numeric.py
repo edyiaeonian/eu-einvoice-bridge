@@ -1,7 +1,7 @@
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Annotated, Any
 
-from pydantic import BeforeValidator
+from pydantic import AfterValidator, BeforeValidator
 
 CENTS = Decimal("0.01")
 
@@ -36,3 +36,28 @@ def _reject_float(value: Any) -> Any:
 
 
 ExactDecimal = Annotated[Decimal, BeforeValidator(_reject_float)]
+
+
+def _at_most_two_decimals(value: Decimal) -> Decimal:
+    """Refuse, rather than round, a monetary amount with sub-cent digits.
+
+    EN16931 caps these at two decimals, fatally: BR-DEC-01 and -05 for
+    allowances and charges, -16 for the paid amount, -23 for a line's net
+    amount. Rounding here would hide the input error, and rounding later is
+    worse -- that is how half-even formatting in the serializer came to
+    disagree with the half-up breakdown.
+
+    Trailing zeros are not extra precision: 10.500 is accepted and stored as
+    10.50, because the value, not its spelling, is what has two decimals.
+    """
+    exact = value.quantize(CENTS, rounding=ROUND_HALF_UP)
+    if exact != value:
+        raise ValueError(
+            f"at most two decimal places are allowed for a monetary amount, "
+            f"got {value}"
+        )
+    return exact
+
+
+# A monetary amount whose value has at most two decimal places.
+Amount = Annotated[ExactDecimal, AfterValidator(_at_most_two_decimals)]

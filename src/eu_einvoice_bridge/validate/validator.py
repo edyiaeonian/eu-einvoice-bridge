@@ -98,10 +98,19 @@ def _xsd_issues(tree: etree._ElementTree) -> list[ValidationIssue]:
     ]
 
 
+# Every assertion in the official rules carries a flag. Of the 979 in the
+# vendored XSLT, 281 are fatal and 698 are warnings -- the whole UBL-CR series
+# among them -- so treating every failure as fatal would reject invoices the
+# standard accepts.
+_FLAG_SEVERITY = {"fatal": Severity.ERROR, "warning": Severity.WARNING}
+
+
 def _schematron_issues(xml: bytes) -> list[ValidationIssue]:
     svrl = etree.fromstring(_schematron_svrl(xml).encode("utf-8"))
     issues = []
-    for tag, severity in (
+    for tag, unflagged in (
+        # A failed assertion without a flag is assumed fatal: the cautious
+        # reading, since the alternative is waving through a real violation.
         ("failed-assert", Severity.ERROR),
         ("successful-report", Severity.WARNING),
     ):
@@ -112,7 +121,7 @@ def _schematron_issues(xml: bytes) -> list[ValidationIssue]:
             issues.append(
                 ValidationIssue(
                     source="schematron",
-                    severity=severity,
+                    severity=_FLAG_SEVERITY.get(node.get("flag"), unflagged),
                     rule_id=node.get("id"),
                     business_terms=tuple(dict.fromkeys(_TERM.findall(raw))),
                     location=_readable_location(node.get("location")),

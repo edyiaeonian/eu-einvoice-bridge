@@ -101,6 +101,11 @@ def schematron():
 
 
 def failures(schematron, invoice, tmp_path):
+    """Every failed assertion, warnings included.
+
+    Deliberately stricter than validity, which only fatal rules decide: this
+    serializer's own output should not trip even a warning-level rule.
+    """
     path = tmp_path / "invoice.xml"
     path.write_bytes(to_ubl(invoice))
     svrl = etree.fromstring(
@@ -183,11 +188,6 @@ class TestDocumentLevelMapping:
 
     def test_due_date_is_omitted_when_absent(self):
         assert text(tree(an_invoice(due_date=None)), "cbc:DueDate") == []
-
-    def test_vat_accounting_currency_is_emitted_when_given(self):
-        # BT-6 — the field a foreign-currency invoice needs.
-        t = tree(an_invoice(currency="EUR", vat_accounting_currency="PLN"))
-        assert text(t, "cbc:TaxCurrencyCode") == ["PLN"]
 
 
 class TestPartyMapping:

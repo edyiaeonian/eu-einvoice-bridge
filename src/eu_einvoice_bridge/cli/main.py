@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from ..model import Invoice
 from ..ubl import to_ubl
-from ..validate import ValidationIssue, validate_ubl
+from ..validate import ValidationIssue, has_errors, validate_ubl
 from .report import format_issues, format_success, issues_from_pydantic
 
 EXIT_OK = 0
@@ -44,41 +44,48 @@ def _load(path: Path) -> Invoice:
         raise
 
 
-def _check(path: Path) -> tuple[Invoice | None, list[ValidationIssue]]:
+def _check(
+    path: Path,
+) -> tuple[Invoice | None, bytes | None, list[ValidationIssue]]:
     """Run the chain, stopping at the first layer that has something to say."""
     try:
         invoice = _load(path)
     except ValidationError as exc:
         # The model rejected it, so there is nothing to serialize and the later
         # layers have nothing to look at.
-        return None, issues_from_pydantic(exc)
+        return None, None, issues_from_pydantic(exc)
 
-    return invoice, validate_ubl(to_ubl(invoice))
+    xml = to_ubl(invoice)
+    return invoice, xml, validate_ubl(xml)
 
 
 def _validate_command(args) -> int:
     path = Path(args.input)
-    invoice, issues = _check(path)
+    invoice, _, issues = _check(path)
 
-    if issues:
+    if has_errors(issues):
         print(format_issues(path.name, issues), end="")
         return EXIT_INVALID
 
-    print(format_success(path.name, invoice), end="")
+    # Whatever remains is warnings: shown, but they do not make it invalid.
+    print(format_success(path.name, invoice, issues), end="")
     return EXIT_OK
 
 
 def _convert_command(args) -> int:
     path = Path(args.input)
-    invoice, issues = _check(path)
+    invoice, xml, issues = _check(path)
 
-    if issues:
+    if has_errors(issues):
         print(format_issues(path.name, issues), end="")
         # Writing a file known to be invalid only moves the problem downstream.
         print("no output written", file=sys.stderr)
         return EXIT_INVALID
 
-    xml = to_ubl(invoice)
+    if issues:
+        # stderr, so warnings never end up inside XML written to stdout.
+        print(format_issues(path.name, issues), end="", file=sys.stderr)
+
     if args.output:
         Path(args.output).write_bytes(xml)
         print(f"{path.name}: wrote {args.output}")
