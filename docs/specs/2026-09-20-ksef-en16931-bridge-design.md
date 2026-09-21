@@ -1,6 +1,6 @@
 # EU E-Invoice Bridge 設計規格
 
-**日期**:2026-09-20(v3,經兩輪技術審查後修訂)
+**日期**:2026-09-20(v3,經兩輪技術審查後修訂;2026-09-21 依階段一完成後的外部審查再修訂)
 **狀態**:設計已確認,待撰寫實作計畫
 **背景研究**:見 `docs/BACKGROUND.md`
 
@@ -107,7 +107,7 @@ EN16931 與 FA(3) 並非一對一對應。若讓兩者直接互轉,程式碼會�
 - **正式環境(production)——僅使用沙箱**
 - 多租戶、帳號系統、計費
 - 發票儲存與查詢資料庫
-- **貸項通知單與更正發票(KOR)**——模型可表達發票類型,但輸出器不處理
+- **貸項通知單與更正發票(KOR)**——模型不接受 381:貸項通知單在 UBL 是另一種文件(CreditNote),放進 Invoice 會違反 BR-CL-01
 - **明細層級折讓與附加費(BG-27 / BG-28)**
 - **基數數量(BT-149 / BT-150)**——單價一律以單一計量單位表示
 - **UPO 的 XAdES 簽章驗證**——僅儲存,不驗章
@@ -235,21 +235,23 @@ class PolishExtras:                 # 波蘭專屬,具名而非 dict
 class Invoice:
     number: str                     # BT-1
     issue_date: date                # BT-2
-    type_code: InvoiceTypeCode      # BT-3   380 商業發票 / 381 貸項通知單
+    type_code: InvoiceTypeCode      # BT-3   僅 380 商業發票
     currency: str                   # BT-5
-    vat_accounting_currency: str | None  # BT-6  多幣別時的申報幣別
+    vat_accounting_currency: str | None  # BT-6  階段一一律拒絕,見決策二之後的說明
     due_date: date | None           # BT-9
     seller: Party
     buyer: Party
-    lines: list[LineItem]
-    allowance_charges: list[AllowanceCharge] = []
-    prepaid_amount: Decimal = Decimal("0.00")   # BT-113
+    lines: tuple[LineItem, ...]
+    allowance_charges: tuple[AllowanceCharge, ...] = ()
+    prepaid_amount: Amount = Decimal("0.00")    # BT-113
     extras: PolishExtras | None = None
 
     # 以下為推導欄位,不接受輸入
-    vat_breakdown: list[VatBreakdownEntry]
+    vat_breakdown: tuple[VatBreakdownEntry, ...]
     totals: Totals
 ```
+
+所有模型皆為 `frozen=True`,集合一律用 tuple,理由見決策八。
 
 ### 決策一:模型只存語意,不存格式
 
@@ -262,6 +264,12 @@ class Invoice:
 **光是宣告型別為 `Decimal` 不夠。**Pydantic 會把 float `0.1` 靜默轉成 `Decimal("0.1")`,看起來完全正常——而這正是危險所在:如果上游已經用 float 算過 `0.1 + 0.2`,傳進來的是 `0.30000000000000004`,精度在抵達模型**之前**就丟了,轉型只會把錯誤固定下來。
 
 因此所有數值欄位使用 `ExactDecimal`(帶 `BeforeValidator` 的 annotated 型別),**收到 `float` 直接拋錯**,`Decimal` 與 `str` 照常接受。讓錯誤在邊界大聲出現,而不是在稅額差一分錢被退件時才發現。
+
+**貨幣輸入超過兩位小數時拒絕,不捨入。**明細淨額(BT-131)、文件層級折讓與附加費(BT-92 / BT-99)、預付金額(BT-113)使用 `Amount` 型別,依據 BR-DEC-23、-01、-05、-16(皆為 fatal)。在模型捨入會掩蓋輸入錯誤;在序列化器捨入更糟——這正是曾經發生過的 bug(見決策七 ③)。尾端的零不算額外精度:`10.500` 接受並存為 `10.50`。
+
+**單價(BT-146)與數量不受此限**,官方沒有小數位數規定,`0.125` 是合法單價,必須原樣輸出。
+
+**BT-6(申報幣別)在階段一一律拒絕。**BR-53(fatal)規定有 BT-6 就必須有 BT-111(以申報幣別計的總稅額),而計算它需要匯率,模型目前沒有。接受 BT-6 等於保證產出無效發票,所以在輸入時就拒絕——這是第 7 節「輸出前即失敗」原則在階段一的應用。
 
 ### 決策三:稅別用列舉,不用稅率數值代表
 
@@ -287,11 +295,13 @@ class Invoice:
 
 `vat_breakdown` 與 `totals` **皆為推導欄位**,由 `lines`、`allowance_charges`、`prepaid_amount` 計算產生。
 
-**實作機制**:以 Pydantic 的 `@model_validator(mode="after")` 在模型建構完成後計算並填入,並將兩者排除於輸入 schema 之外。使用者無法直接指定,亦無法使模型處於明細與彙總不一致的狀態。
+**實作機制**:以 `@computed_field` 搭配 `cached_property` 實作,不是輸入欄位——直接指定會被 `extra="forbid"` 拒絕。`model_post_init` 在建構時就觸發推導,讓不一致的輸入在建構當下失敗,而不是在第一次存取時才在遠處爆開。
 
 **免稅理由的來源**:免稅理由掛在 `LineItem` 上,而非直接輸入到 `VatBreakdownEntry`。推導時依 `(category, rate)` 分組,組內各行的免稅理由**必須一致**,否則視為資料錯誤。
 
-**約束**:`E`(免稅)與 `AE`(逆向課稅)類別必須提供免稅理由,由模型層強制。
+**約束**:需要免稅理由的稅別(`E`、`AE`、`G`、`K`,見決策三)必須提供,由模型層強制。
+
+**明細淨額是輸入,但必須等於 數量 × 單價(half-up 至分)。**官方核心規則沒有任何一條檢查這個等式——明細層級折讓與基數數量會讓它一般不成立。但本模型兩者皆不支援,所以等式精確成立。不一致時**回報而不覆寫**:比較可能的原因是使用者打錯字,應該讓他看到。
 
 **理由**:若允許人工輸入彙總,明細與彙總可能不一致,而 Schematron 一定會抓到。與其事後被退件,不如讓不一致的狀態根本無法被建構。
 
@@ -331,7 +341,11 @@ amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 **理由**:Python `Decimal` 的預設 context 是 `ROUND_HALF_EVEN`(銀行家捨入),但稅務慣例是 `ROUND_HALF_UP`。兩者在 `.005` 給出不同答案,而且是**靜默的差異**。必須明確指定,不依賴預設值。
 
-明細的 `net_amount` 先 quantize 至 0.01 後才進入分組加總,避免中間值的額外小數累積。
+**③ 格式化絕不捨入**
+
+捨入只發生在模型的 `money()`。序列化器曾用 `f"{value:.2f}"` 輸出金額——看似無害,實際上用的是預設 context 的 `ROUND_HALF_EVEN`,把模型刻意擋掉的銀行家捨入又帶回來:`10.005` 變成 `10.00`、單價 `0.125` 變成 `0.12`。後者沒有任何規則抓得到,是靜默的資料遺失。
+
+現在序列化器的 `_amount` 只斷言金額已精確到分,不符就拋錯(代表上游有 bug);單價由 `_price` 以完整精度輸出,只補零、永不捨入。
 
 **③ 容差:已查證,且本專案不需要做容差檢查**
 
@@ -348,6 +362,14 @@ amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 模型存 `Decimal("0.23")`,但 **BT-119 是百分比值 `23`**(BR-CO-17 的公式寫的是 `BT-119 / 100`)。轉換由輸出器負責。
 
 為防止兩者混淆造成災難(填 `23` 會算出 2300% 的稅),稅率欄位加上 `le=1` 上限。VAT 稅率不可能超過 100%,此上限安全且能攔下這個錯誤。
+
+### 決策八:模型不可變
+
+彙總與合計是快取的推導值,所以**輸入在建構後就不能再變**,否則決策四的保證只維持到第一次賦值為止。曾實際重現過:把預付金額改成 0 之後,應付金額仍停在舊值;對 `lines` 做 `append` 之後,合計也沒更新。
+
+- 所有模型設為 `frozen=True`
+- 集合一律用 tuple——`frozen` 只擋重新賦值,擋不住 `list.append`
+- **覆寫 `model_copy`**:Pydantic 的 `model_copy(update=...)` 會複製 `__dict__`(連快取的合計一起),而且更新的值不經驗證,等於繞過 `frozen`。有 `update` 時改為重新走一次完整驗證;沒有更新時快取仍然正確,沿用預設行為
 
 ### 刻意不做的抽象
 
@@ -414,6 +436,8 @@ amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 - 人類可讀訊息
 
 CLI 據此一次列出所有錯誤。**這是本專案唯一的產品介面,品質即專案門面。**
+
+**嚴重度依照官方規則的 `flag`。**vendored XSLT 的 979 條斷言中,281 條是 fatal、698 條是 warning(整個 UBL-CR 系列都是 warning)。只有 fatal 決定發票是否有效;warning 會顯示,但不影響離開碼,`convert` 也照常輸出。沒有 flag 的失敗斷言保守地視為 fatal。
 
 ---
 
@@ -571,6 +595,8 @@ UPO 是官方收據,為送件成功的唯一憑證。
 - 不支援基數數量(BT-149 / BT-150)
 - **稅別不支援 `L`、`M`(西班牙)、`B`(義大利)與 `O`(不課稅)**
 - **不支援整數調整金額(BT-114)**,故 BR-CO-16 簡化為 BT-115 = BT-112 − BT-113
+- **不支援申報幣別(BT-6)**,預計階段二與匯率一併實作
+- **同一行明細有多個跨欄位問題時,只回報第一個**:跨欄位檢查在同一個 `model_validator` 裡依序執行,第一個失敗就中斷。不同明細之間、不同欄位之間的錯誤仍會一次列出
 - 無使用者介面
 - 未實作 CIUS 層驗證(如 Peppol BIS Billing 3.0)
 

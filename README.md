@@ -47,7 +47,8 @@ each difference stays visible in the one place that owns it.
 
 ### The four kinds of mismatch
 
-Each gets a deliberate answer, and they are not the same answer:
+This is phase 2's job — the FA(3) path does not exist yet. Each case gets a deliberate
+answer, and they are not the same answer:
 
 | Case | Handling |
 |---|---|
@@ -65,6 +66,11 @@ so it maps directly. But Poland wants the tax reported in PLN regardless, so FA(
 carries an exchange rate field (`KursWaluty`) that EN16931 has no slot for, while
 EN16931 expresses the same requirement as a separate VAT accounting currency (BT-6).
 One requirement, two unrelated shapes: case 1 and case 2 in the same field.
+
+Phase 1 already applies the fourth rule to itself. BT-6 obliges an invoice to carry
+BT-111, the VAT total in that second currency (BR-53, fatal), and that needs an
+exchange rate the model does not have yet. So the model refuses BT-6 outright rather
+than emit an invoice it knows will fail.
 
 ## What it looks like
 
@@ -108,6 +114,11 @@ invoice.json: valid
 
 Exit codes separate the two questions a caller has: `0` valid, `1` the invoice is
 wrong, `2` the file could not be read at all.
+
+Severity follows the flag on each official rule. Of the 979 assertions, 281 are fatal
+and 698 are warnings; only fatal ones make an invoice invalid. Warnings are listed,
+marked `(warning)`, and neither change the exit code nor stop `convert` from writing
+the file.
 
 ## Architecture
 
@@ -199,7 +210,7 @@ install resolving.
 
 | Document | Contents |
 |---|---|
-| [Design spec](docs/specs/2026-09-20-ksef-en16931-bridge-design.md) | Architecture, data model, the seven design decisions, error handling, test strategy |
+| [Design spec](docs/specs/2026-09-20-ksef-en16931-bridge-design.md) | Architecture, data model, the eight design decisions, error handling, test strategy |
 | [Known limitations](docs/specs/2026-09-20-ksef-en16931-bridge-design.md#14-已知限制) | What this deliberately does not do |
 | [Background](docs/BACKGROUND.md) | ViDA and national mandates, why Poland rather than Hungary, first-party sources |
 | [Phase 1 plan](docs/plans/2026-09-20-phase1-implementation-plan.md) | Step-by-step plan and acceptance criteria |
