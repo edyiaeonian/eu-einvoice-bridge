@@ -60,15 +60,27 @@ def _xsd() -> etree.XMLSchema:
     return etree.XMLSchema(etree.parse(str(UBL_INVOICE_XSD)))
 
 
+@lru_cache(maxsize=1)
+def _saxon() -> tuple[PySaxonProcessor, object]:
+    """One processor and one compiled stylesheet for the life of the process.
+
+    The official XSLT is close to 900 KB; compiling it on every call dominated
+    validation time. The processor is kept alongside the executable because
+    the executable depends on it staying alive.
+    """
+    processor = PySaxonProcessor(license=False)
+    executable = processor.new_xslt30_processor().compile_stylesheet(
+        stylesheet_file=str(EN16931_XSLT)
+    )
+    return processor, executable
+
+
 def _schematron_svrl(xml: bytes) -> str:
     # Saxon reads from a file or a string; a string avoids a temp file and the
     # cleanup that would come with it.
-    with PySaxonProcessor(license=False) as proc:
-        executable = proc.new_xslt30_processor().compile_stylesheet(
-            stylesheet_file=str(EN16931_XSLT)
-        )
-        document = proc.parse_xml(xml_text=xml.decode("utf-8"))
-        return executable.transform_to_string(xdm_node=document)
+    processor, executable = _saxon()
+    document = processor.parse_xml(xml_text=xml.decode("utf-8"))
+    return executable.transform_to_string(xdm_node=document)
 
 
 def _parse(xml: bytes) -> tuple[etree._ElementTree | None, ValidationIssue | None]:
