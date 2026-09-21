@@ -153,7 +153,7 @@ FA(3) 的 `Fa` 底下沒有文件層級折讓元素。唯一看似相近的 `Roz
 
 依上方第 2 類表格建立具名欄位,不用 dict。
 
-### 步驟 3:FA(3) 輸出器
+### 步驟 3:FA(3) 輸出器 ✅
 
 `Naglowek`、`Podmiot1/2`、`Fa` 表頭、`P_13`/`P_14` 分格、`FaWiersz` 與 `P_12` 代碼、`Adnotacje`(推導項 + `PolishExtras` 項)。黃金檔案測試。
 
