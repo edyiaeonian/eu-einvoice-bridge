@@ -38,7 +38,12 @@ class VatCategory(StrEnum):
 
 
 class InvoiceTypeCode(StrEnum):
-    """UNTDID 1001 document type codes (BT-3)."""
+    """UNTDID 1001 document type codes (BT-3).
+
+    Only the commercial invoice. A credit note (381) is a different UBL
+    document, CreditNote rather than Invoice, and an Invoice carrying 381 fails
+    BR-CL-01 fatally. Credit notes are out of scope, so the model refuses the
+    code rather than accept something the serializer cannot emit validly.
+    """
 
     COMMERCIAL_INVOICE = "380"
-    CREDIT_NOTE = "381"

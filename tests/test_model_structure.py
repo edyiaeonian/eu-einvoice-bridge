@@ -240,6 +240,11 @@ class TestAllowanceCharge:
 
 
 class TestInvoiceTypeCode:
-    def test_covers_commercial_invoice_and_credit_note(self):
-        assert InvoiceTypeCode.COMMERCIAL_INVOICE.value == "380"
-        assert InvoiceTypeCode.CREDIT_NOTE.value == "381"
+    def test_only_the_commercial_invoice_is_supported(self):
+        assert [c.value for c in InvoiceTypeCode] == ["380"]
+
+    def test_a_credit_note_code_is_refused(self):
+        # 381 belongs to UBL's CreditNote document; inside an Invoice it fails
+        # BR-CL-01, so accepting it would guarantee an invalid output.
+        with pytest.raises(ValueError):
+            InvoiceTypeCode("381")
