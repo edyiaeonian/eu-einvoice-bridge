@@ -54,7 +54,29 @@ EUPL 1.2 要求:
 
 ---
 
+---
+
+## UBL 2.1 Schema(OASIS)
+
+| 項目 | 內容 |
+|---|---|
+| 來源 | `docs.oasis-open.org/ubl/os-UBL-2.1/xsd/` |
+| 版本 | UBL 2.1 OASIS Standard |
+| 取得日期 | 2026-09-21 |
+| 檔案數 | 14(含遞迴相依的 import/include) |
+| 大小 | 約 2.7 MB |
+| **著作權** | **Copyright (c) OASIS Open 2013. All Rights Reserved.** |
+
+取得方式為從 `UBL-Invoice-2.1.xsd` 起遞迴解析 `schemaLocation` 直到閉合,未手動挑選,以確保相依完整。目錄結構(`xsd/maindoc/`、`xsd/common/`)維持原樣,因為 XSD 之間以相對路徑互相引用。
+
+**授權**:依 OASIS IPR Policy,OASIS Standard 的規範文件與 schema 可自由複製與散布,條件為保留著作權聲明。各檔案檔頭的原始聲明皆未修改。
+
+### 為何需要 XSD 層
+
+**Schematron 通過不等於 XSD 通過。**Schematron 以 XPath 尋找元素,元素順序錯誤時通常仍能找到並通過驗證;但 UBL 的 XSD 以 sequence 定義順序,順序錯誤會被擋下。兩層檢查的是不同的東西,缺一不可。
+
+---
+
 ## 尚待加入
 
-- UBL 2.1 XSD(OASIS)—— 語法驗證層需要,授權須另行確認
 - FA(3) XSD(波蘭財政部)—— 階段二需要
