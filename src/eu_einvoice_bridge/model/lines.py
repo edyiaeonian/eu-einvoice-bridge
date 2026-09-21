@@ -47,7 +47,7 @@ def _check_exemption_reason(
 class LineItem(BaseModel):
     """An invoice line (BG-25)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     line_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
@@ -74,7 +74,7 @@ class LineItem(BaseModel):
 class AllowanceCharge(BaseModel):
     """A document-level allowance (BG-20) or charge (BG-21)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     is_charge: bool
     # Always positive: direction is carried by is_charge, never by the sign, so

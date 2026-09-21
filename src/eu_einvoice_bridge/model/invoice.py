@@ -66,7 +66,7 @@ def _reason_for_group(lines: list[LineItem]) -> tuple[str | None, str | None]:
 
 
 class Invoice(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     number: str = Field(min_length=1)  # BT-1
     issue_date: date  # BT-2
@@ -76,8 +76,8 @@ class Invoice(BaseModel):
     due_date: date | None = None  # BT-9
     seller: Party
     buyer: Party
-    lines: list[LineItem] = Field(min_length=1)
-    allowance_charges: list[AllowanceCharge] = Field(default_factory=list)
+    lines: tuple[LineItem, ...] = Field(min_length=1)
+    allowance_charges: tuple[AllowanceCharge, ...] = ()
     prepaid_amount: Amount = Field(default=Decimal("0.00"), ge=0)  # BT-113, BR-DEC-16
 
     @field_validator("vat_accounting_currency")
@@ -101,7 +101,7 @@ class Invoice(BaseModel):
 
     @computed_field
     @cached_property
-    def vat_breakdown(self) -> list[VatBreakdownEntry]:
+    def vat_breakdown(self) -> tuple[VatBreakdownEntry, ...]:
         """BG-23, grouped per BR-S-08 and taxed per BR-CO-17.
 
         Tax is computed once on the group total, not per line and summed: the
@@ -145,7 +145,7 @@ class Invoice(BaseModel):
                     exemption_reason_code=reason_code,
                 )
             )
-        return entries
+        return tuple(entries)
 
     @computed_field
     @cached_property
@@ -188,3 +188,18 @@ class Invoice(BaseModel):
         # Force derivation so inconsistent input fails at construction rather
         # than at first access, somewhere far from the cause.
         _ = self.totals
+
+    def model_copy(self, *, update=None, deep: bool = False) -> Self:
+        """Copy, rebuilding through validation whenever anything changes.
+
+        frozen=True stops assignment, but Pydantic's model_copy goes around it:
+        it copies __dict__ -- the cached breakdown and totals included -- and
+        applies `update` without validating it. A copy with a new prepaid amount
+        would keep the old amount due, and an update of 0.005 would slip past
+        the two-decimal rule. An unchanged copy keeps a correct cache, so only
+        updates take the slower path.
+        """
+        if not update:
+            return super().model_copy(deep=deep)
+        data = self.model_dump(exclude={"vat_breakdown", "totals"})
+        return type(self).model_validate({**data, **update})

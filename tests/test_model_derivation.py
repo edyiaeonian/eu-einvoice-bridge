@@ -361,3 +361,43 @@ class TestInputsTheModelCannotYetHonour:
         with pytest.raises(ValidationError) as exc:
             an_invoice(prepaid_amount=Decimal("5.005"))
         assert exc.value.errors()[0]["loc"] == ("prepaid_amount",)
+
+
+class TestTheInvoiceCannotDriftFromItsTotals:
+    """Totals are computed once and cached, so the inputs must not change after.
+
+    Without immutability every derivation guarantee holds only until the first
+    assignment -- the stale totals would then be serialized without complaint.
+    """
+
+    def test_a_field_cannot_be_reassigned(self):
+        invoice = an_invoice(prepaid_amount=Decimal("10.00"))
+        with pytest.raises(ValidationError):
+            invoice.prepaid_amount = Decimal("0.00")
+
+    def test_lines_cannot_be_appended_to(self):
+        invoice = an_invoice()
+        with pytest.raises(AttributeError):
+            invoice.lines.append(a_line("2"))
+
+    def test_a_line_cannot_be_edited_in_place(self):
+        invoice = an_invoice()
+        with pytest.raises(ValidationError):
+            invoice.lines[0].net_amount = Decimal("1.00")
+
+    def test_the_derived_breakdown_cannot_be_edited_either(self):
+        invoice = an_invoice()
+        with pytest.raises(AttributeError):
+            invoice.vat_breakdown.append(invoice.vat_breakdown[0])
+
+    def test_model_copy_with_update_recomputes_rather_than_reusing_the_cache(self):
+        # Pydantic's model_copy copies __dict__, cached totals included, and
+        # does not validate the update -- frozen or not.
+        invoice = an_invoice(prepaid_amount=Decimal("10.00"))
+        copied = invoice.model_copy(update={"prepaid_amount": Decimal("0.00")})
+        assert copied.totals.amount_due == copied.totals.total_with_vat
+
+    def test_model_copy_with_update_still_validates(self):
+        invoice = an_invoice()
+        with pytest.raises(ValidationError):
+            invoice.model_copy(update={"prepaid_amount": Decimal("0.005")})

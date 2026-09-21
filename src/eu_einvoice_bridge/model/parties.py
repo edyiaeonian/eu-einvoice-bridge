@@ -8,7 +8,7 @@ CountryCode = Annotated[
 
 
 class Address(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     street: str = Field(min_length=1)
     city: str = Field(min_length=1)
@@ -19,7 +19,7 @@ class Address(BaseModel):
 class Party(BaseModel):
     """A seller or buyer (BG-4 / BG-7)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     name: str = Field(min_length=1)
     # BT-30 and BT-31 identify a party in different registers and are not
