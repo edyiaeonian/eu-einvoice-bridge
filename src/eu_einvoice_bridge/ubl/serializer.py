@@ -10,8 +10,10 @@ from decimal import Decimal
 
 from lxml import etree
 
-from ..model import AllowanceCharge, Invoice, LineItem, Party, VatCategory, money
-from ..model.numeric import CENTS
+from ..formatting import amount as _amount
+from ..formatting import price as _price
+from ..formatting import quantity as _quantity
+from ..model import AllowanceCharge, Invoice, LineItem, Party, VatCategory
 
 INVOICE_NS = "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
 CAC = "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
@@ -34,38 +36,6 @@ def _el(parent, ns: str, name: str, text: str | None = None, **attrs):
     return node
 
 
-def _amount(value: Decimal) -> str:
-    """Render a monetary amount without rounding it.
-
-    f"{value:.2f}" looks harmless but rounds with the context default,
-    ROUND_HALF_EVEN, quietly undoing the half-up policy the model applies:
-    10.005 would come out as 10.00. Rounding is the model's job, and every
-    amount reaching here is already exact to the cent, so anything else is a
-    bug upstream and is raised rather than papered over.
-    """
-    exact = money(value)
-    if exact != value:
-        raise ValueError(
-            f"amount {value} has more than two decimals; the model should have "
-            f"refused it before serialization"
-        )
-    return f"{exact:f}"
-
-
-def _price(value: Decimal) -> str:
-    """Render BT-146 at its full precision.
-
-    Unit price has no decimal limit in EN16931, so 0.125 is a legitimate price
-    and must survive as 0.125. Squeezing it to two decimals would lose data that
-    no downstream rule would ever notice. Prices with fewer than two decimals
-    are padded to two for readability; padding adds zeros and never rounds.
-    """
-    normalized = value.normalize()
-    if normalized.as_tuple().exponent > -2:
-        normalized = normalized.quantize(CENTS)
-    return f"{normalized:f}"
-
-
 def _percent(rate: Decimal) -> str:
     """BT-119 is a percentage while the model holds a fraction.
 
@@ -73,10 +43,6 @@ def _percent(rate: Decimal) -> str:
     make it "23.00", and :f keeps large or small values out of exponent form.
     """
     return f"{(rate * 100).normalize():f}"
-
-
-def _quantity(value: Decimal) -> str:
-    return f"{value.normalize():f}"
 
 
 def _tax_category(
