@@ -1,7 +1,7 @@
 # 階段一實作計畫:離線驗證管線
 
 **日期**:2026-09-20
-**對應規格**:`docs/superpowers/specs/2026-09-20-ksef-en16931-bridge-design.md`
+**對應規格**:`docs/specs/2026-09-20-ksef-en16931-bridge-design.md`
 **階段目標**:從 JSON 輸入產生通過官方 XSD 與 Schematron 驗證的 EN16931 UBL 發票,並以 CLI 一次回報所有錯誤。全程離線。
 
 ---

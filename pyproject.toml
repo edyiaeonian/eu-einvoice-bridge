@@ -32,6 +32,10 @@ packages = ["src/eu_einvoice_bridge"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# src layout 直接上 sys.path,讓測試不依賴 editable 安裝是否生效。
+# macOS 上 venv 內的檔案會帶 UF_HIDDEN 旗標,而 Python 3.14 的 site.py 會靜默
+# 跳過隱藏的 .pth 檔 —— editable 安裝因此可能無聲失效。測試不該受此影響。
+pythonpath = ["src"]
 # 整合測試預設不執行:需要網路與 KSeF 沙箱,沙箱不可用時不應讓測試全紅。
 # 執行方式:pytest -m integration
 addopts = "-m 'not integration'"
