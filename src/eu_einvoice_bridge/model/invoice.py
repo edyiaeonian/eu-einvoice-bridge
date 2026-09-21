@@ -16,6 +16,7 @@ from .enums import InvoiceTypeCode, VatCategory
 from .lines import AllowanceCharge, LineItem, VatRate
 from .numeric import MAX_DIGITS, Amount, money
 from .parties import Party
+from .polish import PolishExtras
 
 CurrencyCode = Annotated[
     str, StringConstraints(min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
@@ -81,6 +82,9 @@ class Invoice(BaseModel):
     prepaid_amount: Amount = Field(
         default=Decimal("0.00"), ge=0, max_digits=MAX_DIGITS
     )  # BT-113, BR-DEC-16
+    # Needed only for FA(3); whether its absence blocks that output is decided
+    # by the FA(3) mapping, not here.
+    extras: PolishExtras | None = None
 
     @field_validator("vat_accounting_currency")
     @classmethod

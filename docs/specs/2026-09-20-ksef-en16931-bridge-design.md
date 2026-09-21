@@ -227,10 +227,16 @@ class Totals:                       # BG-22 — 完全推導
     prepaid_amount: Decimal         # BT-113
     amount_due: Decimal             # BT-115 = 112 - 113
 
-class PolishExtras:                 # 波蘭專屬,具名而非 dict
-    exchange_rate: Decimal | None = None
-    invoice_kind: PolishInvoiceKind     # RodzajFaktury: VAT / KOR / ZAL ...
-    annotations: Annotations            # Adnotacje;確切欄位依 FA(3) XSD 定義
+class PolishExtras:                 # 波蘭專屬,具名而非 dict;皆為 StrictBool、無預設值
+    buyer_local_government_unit: bool   # Podmiot2/JST
+    buyer_vat_group_member: bool        # Podmiot2/GV
+    cash_accounting: bool               # Adnotacje/P_16
+    self_billing: bool                  # Adnotacje/P_17
+    split_payment: bool                 # Adnotacje/P_18A
+    simplified_triangular_procedure: bool   # Adnotacje/P_23
+    margin_scheme: bool                 # Adnotacje/PMarzy
+    intra_eu_new_means_of_transport: bool   # Adnotacje/NoweSrodkiTransportu
+    exemption_basis: ExemptionBasis | None  # 選擇 P_19A / P_19B / P_19C
 
 class Invoice:
     number: str                     # BT-1
@@ -314,6 +320,12 @@ R120 的完整公式還包含明細層級附加費與折讓、以及以基數數
 `extras: PolishExtras`,不是 `country_extras: dict`。
 
 **理由**:使用 Pydantic 的目的就是型別安全,留一個無型別 dict 逃生門會產生 `extras["KursWaluty"]` 這類字串鍵程式碼,型別檢查與 IDE 補全全部失效。未來加第二國時再改為 discriminated union。
+
+**`extras` 在發票上選填,但提供時每一項都必填、沒有預設值。**只需要 UBL 的發票不必提供;要產出 FA(3) 而缺少它,由 FA(3) 對應以第 4 類錯誤回報。不設預設值的理由:預設「否」可能產生「XSD 通過、KSeF 接受、但法律上錯誤」的發票,例如某些商品超過門檻時依法必須標示分割支付(`P_18A`)。
+
+**聲明採嚴格布林,只接受 JSON 的 `true`/`false`。**FA(3) 本身以 `"1"`/`"2"` 表示是/否,若接受字串,容易有人把代表「否」的 `"2"` 照抄過來。
+
+**能從發票推導的不放進 `extras`**:逆向課稅(`P_18`)看是否有 `AE` 明細;免稅標記(`P_19`/`P_19N`)看是否有 `E` 明細;發票種類只支援 380,固定為 `VAT`。原草稿中的 `invoice_kind` 因此移除,`exchange_rate` 留待多幣別步驟。
 
 ### 決策六:驗證分層且刻意不重複
 
