@@ -1,5 +1,7 @@
 # EU E-Invoice Bridge
 
+[![CI](https://github.com/edyiaeonian/eu-einvoice-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/edyiaeonian/eu-einvoice-bridge/actions/workflows/ci.yml)
+
 Turning one neutral invoice into two things at once: an **EN16931** invoice in UBL 2.1
 syntax, and the **FA(3)** XML that Poland's KSeF requires.
 
