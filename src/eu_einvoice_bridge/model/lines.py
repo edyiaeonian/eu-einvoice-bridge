@@ -1,9 +1,26 @@
-from typing import Self
+from decimal import Decimal
+from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .enums import VatCategory
 from .numeric import ExactDecimal
+
+# Rates are fractions: 0.23 means 23%. The upper bound catches the percentage
+# mistake -- 23 would otherwise compute 2300% tax without complaint.
+VatRate = Annotated[ExactDecimal, Field(ge=0, le=1)]
+
+
+def _check_category_rate(category: VatCategory, rate: Decimal) -> None:
+    """BR-S-05 against BR-Z/E/AE/G/IC-05, and the same for allowances/charges."""
+    if category.requires_positive_rate and rate <= 0:
+        raise ValueError(
+            f"VAT category {category.value} requires a rate greater than zero"
+        )
+    if not category.requires_positive_rate and rate != 0:
+        raise ValueError(
+            f"VAT category {category.value} requires a rate of zero, got {rate}"
+        )
 
 
 def _check_exemption_reason(
@@ -38,13 +55,14 @@ class LineItem(BaseModel):
     unit_price: ExactDecimal = Field(ge=0)
     net_amount: ExactDecimal = Field(ge=0)
     vat_category: VatCategory
-    vat_rate: ExactDecimal = Field(ge=0)
+    vat_rate: VatRate
     # Held on the line so the VAT breakdown can be derived rather than supplied.
     exemption_reason: str | None = None
     exemption_reason_code: str | None = None
 
     @model_validator(mode="after")
-    def _exemption_reason_matches_category(self) -> Self:
+    def _category_constraints(self) -> Self:
+        _check_category_rate(self.vat_category, self.vat_rate)
         _check_exemption_reason(
             self.vat_category, self.exemption_reason, self.exemption_reason_code
         )
@@ -61,5 +79,10 @@ class AllowanceCharge(BaseModel):
     # that a sign error cannot quietly turn a discount into a surcharge.
     amount: ExactDecimal = Field(ge=0)
     vat_category: VatCategory
-    vat_rate: ExactDecimal = Field(ge=0)
+    vat_rate: VatRate
     reason: str | None = None
+
+    @model_validator(mode="after")
+    def _category_matches_rate(self) -> Self:
+        _check_category_rate(self.vat_category, self.vat_rate)
+        return self

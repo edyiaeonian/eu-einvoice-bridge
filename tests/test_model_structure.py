@@ -50,7 +50,9 @@ def a_line(**overrides):
 
 class TestVatCategory:
     def test_supported_codes_match_untdid_5305(self):
-        assert {c.value for c in VatCategory} == {"S", "Z", "E", "AE", "K", "G", "O"}
+        # O is excluded deliberately: BR-O-05 wants the rate absent rather than
+        # zero, and BR-O-11..14 forbid mixing it with other categories.
+        assert {c.value for c in VatCategory} == {"S", "Z", "E", "AE", "K", "G"}
 
     @pytest.mark.parametrize(
         "category",
@@ -58,7 +60,6 @@ class TestVatCategory:
             VatCategory.EXEMPT,
             VatCategory.REVERSE_CHARGE,
             VatCategory.EXPORT,
-            VatCategory.OUT_OF_SCOPE,
             VatCategory.INTRA_COMMUNITY,
         ],
     )
@@ -108,13 +109,12 @@ class TestLineItemExemptionReason:
             VatCategory.EXEMPT,
             VatCategory.REVERSE_CHARGE,
             VatCategory.EXPORT,
-            VatCategory.OUT_OF_SCOPE,
             VatCategory.INTRA_COMMUNITY,
         ],
     )
     def test_rejected_when_a_required_reason_is_missing(self, category):
-        # BR-E-10 / BR-AE-10 / BR-G-10 / BR-O-10 / BR-IC-10
-        with pytest.raises(ValidationError):
+        # BR-E-10 / BR-AE-10 / BR-G-10 / BR-IC-10
+        with pytest.raises(ValidationError, match="requires an exemption reason"):
             a_line(vat_category=category, vat_rate=Decimal("0"))
 
     def test_reason_text_alone_is_enough(self):
@@ -133,13 +133,21 @@ class TestLineItemExemptionReason:
         )
         assert line.exemption_reason is None
 
-    @pytest.mark.parametrize("category", [VatCategory.STANDARD, VatCategory.ZERO_RATED])
-    def test_rejected_when_a_forbidden_reason_is_present(self, category):
+    @pytest.mark.parametrize(
+        ("category", "rate"),
+        [
+            # A valid rate for each category, so the failure can only come from
+            # the reason itself and not from the category/rate rule.
+            (VatCategory.STANDARD, Decimal("0.23")),
+            (VatCategory.ZERO_RATED, Decimal("0")),
+        ],
+    )
+    def test_rejected_when_a_forbidden_reason_is_present(self, category, rate):
         # BR-S-10 / BR-Z-10 — the constraint runs in both directions.
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValidationError, match="must not carry an exemption reason"):
             a_line(
                 vat_category=category,
-                vat_rate=Decimal("0"),
+                vat_rate=rate,
                 exemption_reason="should not be here",
             )
 

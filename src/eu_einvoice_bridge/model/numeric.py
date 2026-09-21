@@ -1,7 +1,21 @@
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Annotated, Any
 
 from pydantic import BeforeValidator
+
+CENTS = Decimal("0.01")
+
+
+def money(value: Decimal) -> Decimal:
+    """Round a monetary amount to two decimals, half away from zero.
+
+    The mode is stated explicitly because Python's default is ROUND_HALF_EVEN
+    (banker's rounding), which disagrees with tax convention at exactly .005 and
+    would do so silently: 0.005 becomes 0.00 under the default and 0.01 here.
+    XPath's round(), which the official Schematron uses, rounds half upwards, so
+    this matches what the rules check against.
+    """
+    return value.quantize(CENTS, rounding=ROUND_HALF_UP)
 
 
 def _reject_float(value: Any) -> Any:
