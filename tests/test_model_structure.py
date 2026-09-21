@@ -252,15 +252,15 @@ class TestInvoiceTypeCode:
 
 
 class TestLineNetAmountMatchesQuantityTimesPrice:
-    """No official rule relates BT-131 to BT-129 x BT-146.
+    """EN16931 core does not relate BT-131 to BT-129 x BT-146; Peppol does.
 
-    In general it cannot: line-level allowances (BG-27/28) and a base quantity
-    (BT-149) break the identity. This model supports neither, so here the
-    identity is exact, and a stated amount that disagrees with it is an input
-    error worth reporting rather than overriding.
+    Peppol BIS Billing 3.0's PEPPOL-EN16931-R120 (fatal) checks the line net
+    amount against the unrounded quantity x price, with a slack of 0.02 either
+    side, inclusive. The same tolerance is used here: the check exists to catch
+    a wrong figure, and a one-cent gap is a rounding convention, not a mistake.
     """
 
-    def test_a_mismatch_is_rejected(self):
+    def test_a_wrong_figure_is_rejected(self):
         with pytest.raises(ValidationError, match="net_amount"):
             a_line(
                 quantity=Decimal("2"),
@@ -268,22 +268,33 @@ class TestLineNetAmountMatchesQuantityTimesPrice:
                 net_amount=Decimal("25.00"),
             )
 
-    def test_sub_cent_products_round_half_up(self):
-        # 1 x 0.125 is 0.13 half-up and 0.12 half-even: same policy as every
-        # other amount, and the example that tells the two apart.
+    @pytest.mark.parametrize("net", ["0.13", "0.12"])
+    def test_either_rounding_convention_is_accepted(self, net):
+        # 1 x 0.125 is 0.13 half-up and 0.12 half-even. R120 accepts both, and
+        # refusing the half-even answer would be stricter than the rule that
+        # actually exists.
         line = a_line(
             quantity=Decimal("1"),
             unit_price=Decimal("0.125"),
-            net_amount=Decimal("0.13"),
+            net_amount=Decimal(net),
         )
-        assert line.net_amount == Decimal("0.13")
+        assert line.net_amount == Decimal(net)
 
-    def test_the_half_even_answer_is_refused(self):
+    def test_a_difference_of_exactly_the_slack_is_accepted(self):
+        # R120's slack is inclusive: exp - 0.02 <= val <= exp + 0.02.
+        line = a_line(
+            quantity=Decimal("1"),
+            unit_price=Decimal("10.00"),
+            net_amount=Decimal("10.02"),
+        )
+        assert line.net_amount == Decimal("10.02")
+
+    def test_a_difference_beyond_the_slack_is_rejected(self):
         with pytest.raises(ValidationError, match="net_amount"):
             a_line(
                 quantity=Decimal("1"),
-                unit_price=Decimal("0.125"),
-                net_amount=Decimal("0.12"),
+                unit_price=Decimal("10.00"),
+                net_amount=Decimal("10.03"),
             )
 
 

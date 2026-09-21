@@ -4,7 +4,7 @@ from typing import Annotated, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .enums import VatCategory
-from .numeric import MAX_DIGITS, Amount, ExactDecimal, money
+from .numeric import MAX_DIGITS, Amount, ExactDecimal
 
 # Rates are fractions: 0.23 means 23%. The upper bound catches the percentage
 # mistake -- 23 would otherwise compute 2300% tax without complaint.
@@ -25,19 +25,30 @@ def _check_category_rate(category: VatCategory, rate: Decimal) -> None:
         )
 
 
-def _check_net_amount(quantity: Decimal, unit_price: Decimal, net: Decimal) -> None:
-    """A line's net amount must equal quantity x unit price, to the cent.
+# PEPPOL-EN16931-R120 compares with u:slack(..., 0.02), which is inclusive.
+NET_AMOUNT_SLACK = Decimal("0.02")
 
-    No official rule checks this, because line-level allowances and a base
-    quantity break the identity in general. This model supports neither, so
-    here it is exact -- and a stated amount that disagrees is an input error
-    to report, not something to overwrite with the computed value.
+
+def _check_net_amount(quantity: Decimal, unit_price: Decimal, net: Decimal) -> None:
+    """A line's net amount must match quantity x unit price.
+
+    EN16931 core has no such rule, but Peppol BIS Billing 3.0 does:
+    PEPPOL-EN16931-R120, fatal, which compares against the unrounded product
+    with 0.02 of slack either side. The same test is applied here. The check
+    exists to catch a wrong figure, which should be reported rather than
+    overwritten with the computed value; a one-cent gap is a rounding
+    convention, and refusing it would be stricter than the rule that exists.
+
+    R120's full formula also adds line charges, subtracts line allowances and
+    divides the price by a base quantity. This model supports none of those
+    (BG-27/28, BT-149), which is the only reason the short form is correct:
+    supporting any of them means adopting the full formula here.
     """
-    expected = money(quantity * unit_price)
-    if net != expected:
+    expected = quantity * unit_price
+    if abs(net - expected) > NET_AMOUNT_SLACK:
         raise ValueError(
             f"net_amount: expected quantity x unit_price = {expected} "
-            f"({quantity} x {unit_price}, rounded half-up to the cent), got {net}"
+            f"({quantity} x {unit_price}) within {NET_AMOUNT_SLACK}, got {net}"
         )
 
 
