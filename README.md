@@ -11,11 +11,11 @@ syntax, and the **FA(3)** XML that Poland's KSeF requires.
 |---|---|---|
 | 1 | Neutral model, UBL serializer, validation chain, CLI error report | ✅ complete |
 | 2 | FA(3) serializer, mismatch handling, multi-currency | ✅ complete |
-| 3 | Encryption, KSeF client, UPO retrieval | planned |
+| 3 | Encryption, KSeF client, UPO retrieval | ✅ complete — verified live against KSeF TEST |
 
-The architecture below describes the finished shape; `crypto` and `ksef` arrive in
-phase 3. See the plans for [phase 1](docs/plans/2026-09-20-phase1-implementation-plan.md)
-and [phase 2](docs/plans/2026-09-21-phase2-implementation-plan.md).
+See the plans for [phase 1](docs/plans/2026-09-20-phase1-implementation-plan.md)
+and [phase 2](docs/plans/2026-09-21-phase2-implementation-plan.md), and the
+[phase 3 record](docs/plans/2026-09-21-phase3-implementation-record.md).
 
 ---
 
@@ -158,6 +158,53 @@ and 698 are warnings; only fatal ones make an invoice invalid. Warnings are list
 marked `(warning)`, and neither change the exit code nor stop `convert` from writing
 the file.
 
+### Sending it to KSeF
+
+`submit` runs the same FA(3) checks, then encrypts the invoice and sends it to
+Poland's **TEST** environment, waits for the verdict and saves the official receipt
+(UPO):
+
+```
+$ einvoice submit invoice.json --test-seller
+created a self-signed KSeF TEST identity for NIP 5046948298 in certs/
+invoice.json: accepted by KSeF TEST
+  KSeF number: 5046948298-20260921-906675C00000-7C
+  UPO:         state/CLI_a555c6.upo.xml
+```
+
+Three decisions carry most of the weight:
+
+**Authentication is an XAdES signature with a self-signed certificate.** The plan was
+a KSeF token, until the API showed that tokens can only be created *after*
+authenticating — so a token can never be the first step. KSeF's TEST environment
+(only TEST) accepts a self-signed certificate shaped like a company seal, with the
+NIP in `organizationIdentifier` as `VATPL-<NIP>`. The program makes one on first use,
+so a fresh clone can submit with no portal login and no manual setup.
+
+**An unanswered send is never retried.** Asking for a status twice is harmless;
+sending an invoice twice is not. The client has two paths: idempotent calls are
+retried with exponential backoff, and the send, the session opening and the one-time
+token redemption are not. Making the send retryable, as a check, turns four tests red.
+
+**The record is written before the send.** The dangerous moment is a send that went
+out and got no answer: there is no reference number yet, and no way to know whether
+KSeF has the invoice. So the state file says `sending` first. On a rerun, the program
+lists the session's invoices and looks for the SHA-256 of the exact bytes it sent;
+found, it resumes polling; not found, it stops and says so rather than guess. The
+XML sent is kept too — FA(3) carries a generation timestamp, so rendering it again
+would give a different hash.
+
+| Exit code | Meaning |
+|---|---|
+| `0` | Accepted; UPO saved |
+| `1` | The invoice is wrong — locally, or KSeF rejected it (with its reason) |
+| `2` | The file could not be read |
+| `3` | Sent and still processing — run the same command again |
+| `4` | The submission failed: network, authentication, or a previous send that cannot be accounted for |
+
+KSeF accepts invoices only from the NIP that authenticated. Without `--test-seller`,
+a different seller is refused before anything is sent.
+
 ## Architecture
 
 ```
@@ -218,13 +265,24 @@ it lacks the Polish statutory declarations. The report names both.
 Tests run fully offline, including the Schematron validation, because the official
 validation artefacts are vendored rather than fetched.
 
-Tests that need Poland's sandbox are marked `integration` and excluded by default, so
-a sandbox outage never turns the suite red. They arrive in phase 3, along with the
-credentials setup they require:
+Send an invoice to Poland's TEST environment. No account or credentials are needed:
+a self-signed test identity is created in `certs/` on first use, and records and UPOs
+go to `state/`. Both directories are git-ignored.
 
 ```bash
-./.venv/bin/pytest -m integration    # phase 3
+./.venv/bin/einvoice submit examples/invoice-fa3.json --test-seller
 ```
+
+The KSeF client's state machine is tested offline with mocked HTTP. The one test
+that needs the real sandbox is marked `integration` and excluded by default, so a
+sandbox outage never turns the suite red:
+
+```bash
+./.venv/bin/pytest -m integration
+```
+
+KSeF TEST is shared by every integrator, so the test uses a random identity and
+buyer each run. It is down for maintenance 16:00–18:00 Warsaw time.
 
 ### Troubleshooting: keep the venv out of iCloud Drive
 
@@ -263,6 +321,8 @@ install resolving.
 | [Known limitations](docs/specs/2026-09-20-ksef-en16931-bridge-design.md#14-已知限制) | What this deliberately does not do |
 | [Background](docs/BACKGROUND.md) | ViDA and national mandates, why Poland rather than Hungary, first-party sources |
 | [Phase 1 plan](docs/plans/2026-09-20-phase1-implementation-plan.md) | Step-by-step plan and acceptance criteria |
+| [Phase 2 plan](docs/plans/2026-09-21-phase2-implementation-plan.md) | FA(3) serializer, the four mismatch categories, multi-currency |
+| [Phase 3 record](docs/plans/2026-09-21-phase3-implementation-record.md) | KSeF submission: decisions, evidence, live run |
 
 The design documents are written in Traditional Chinese; the spec's structure and the
 BT/BR identifiers throughout are language-independent.

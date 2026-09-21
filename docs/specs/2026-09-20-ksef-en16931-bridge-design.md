@@ -1,7 +1,7 @@
 # EU E-Invoice Bridge 設計規格
 
 **日期**:2026-09-20(v3,經兩輪技術審查後修訂;2026-09-21 依階段一完成後的外部審查再修訂)
-**狀態**:階段一、階段二已完成;階段三待開始
+**狀態**:階段一、二、三皆已完成(階段三紀錄見 `docs/plans/2026-09-21-phase3-implementation-record.md`)
 **背景研究**:見 `docs/BACKGROUND.md`
 
 ---
@@ -30,7 +30,7 @@ EN16931 與 FA(3) 並非一對一對應。若讓兩者直接互轉,程式碼會�
 
 此決策直接決定專案範圍,故留在規格本體。
 
-- **波蘭 KSeF ✅**:測試環境接受匿名資料與標準測試用假 NIP,可在無真實授權下取得 token,**不需波蘭法人或稅號**
+- **波蘭 KSeF ✅**:測試環境接受隨機產生的測試 NIP 與**自簽憑證**,可在無真實授權下完成認證,**不需波蘭法人或稅號**(2026-09-21 實測確認,見第 9 節)
 - **匈牙利 NAV ❌**:需 Ügyfélkapu+ 與匈牙利稅號,測試環境僅供已登記納稅義務人使用,**無在地法人即無法存取**
 
 調查細節見 `docs/BACKGROUND.md` 第 3 節。
@@ -75,8 +75,11 @@ EN16931 與 FA(3) 並非一對一對應。若讓兩者直接互轉,程式碼會�
 1. `crypto` 模組以固定測試向量驗證 AES-256-CBC 與 RSA-OAEP 實作正確
 2. 可在沙箱完成認證、開 session、送出加密發票
 3. 可輪詢狀態並下載 UPO,UPO 與 KSeF 編號寫入本地狀態檔
-4. 程式中斷後重啟,可憑狀態檔的參考編號續查,不重送
+4. 程式中斷後重啟,可憑狀態檔續查,不重送——包括「送出後未收到回應、手上沒有參考編號」的情況(改以發票雜湊值查詢)
 5. `ksef` 模組的狀態機以 `respx` 離線測試,沙箱不可用時仍達成覆蓋
+6. 整合測試(`pytest -m integration`)對真實 KSeF TEST 環境走完全程
+
+**結果**:六項皆達成。2026-09-21 對 KSeF TEST 實測通過,取得 KSeF 編號與 UPO。
 
 ### 重心說明
 
@@ -531,17 +534,42 @@ CLI 據此一次列出所有錯誤。**這是本專案唯一的產品介面,品�
 | 金鑰 | 32 bytes,密碼學安全亂數產生 |
 | IV | 16 bytes |
 | 金鑰包裝 | RSAES-OAEP(SHA-256 / MGF1) |
-| KSeF 公鑰來源 | `GET /api/v2/security/public-key-certificates` |
-| 開 session | `POST /api/v2/sessions/online`(互動模式),附 `formCode`(FA(3))與加密後的對稱金鑰 |
+| KSeF 公鑰來源 | `GET /security/public-key-certificates`,取 `usage` 含 `SymmetricKeyEncryption` 的那張 |
+| 開 session | `POST /sessions/online`(互動模式),附 `formCode` 與加密後的對稱金鑰、IV、`publicKeyId` |
+| `formCode` | `{"systemCode": "FA (3)", "schemaVersion": "1-0E", "value": "FA"}` |
+| 送件內容 | 明文與密文各自的 SHA-256(base64)與大小,加上 base64 密文 |
 | Session 效期 | 12 小時 |
 
-> ⚠️ **上表的端點路徑、參數名稱與 session 效期,須對照 `github.com/CIRFMF/ksef-api` 的 OpenAPI 規格確認後才可實作。**此處僅為設計階段的理解,這類細節最易變動。加密演算法部分(AES-256-CBC + RSA-OAEP/SHA-256)已由兩個獨立來源交叉確認。
+> ✅ **已對照官方 OpenAPI 並實測確認(2026-09-21)。**與設計階段理解不同之處:base URL 是 `https://api-test.ksef.mf.gov.pl/v2`,**不是**部分二手資料寫的 `/api/v2`。
+
+### 實測確認的協定事實
+
+| 項目 | 事實 |
+|---|---|
+| 認證流程 | `POST /auth/challenge` → `POST /auth/xades-signature`(202,回參考編號與暫時 token)→ 輪詢 `GET /auth/{ref}` → `POST /auth/token/redeem` 換 access token |
+| Token 效期 | access token 15 分鐘;refresh token 7 天 |
+| 發票狀態碼 | 100/150 處理中;200 成功並附 `ksefNumber`;≥300 為最終拒絕(如 440 重複發票、450 語意驗證失敗) |
+| Session 發票清單 | 以 `x-continuation-token` 標頭分頁,回應的 `continuationToken` 為空表示最後一頁 |
+| UPO | `application/xml`,命名空間 `http://upo.schematy.mf.gov.pl/KSeF/v4-3` |
+| 維護時段 | TEST 環境每日 16:00–18:00(華沙時間)維護 |
 
 ### 決策
 
 - **MVP 採互動模式**(`/sessions/online`),不做批次模式。兩者開 session 流程一致,互動模式較易除錯。
 - **每個 session 產生新的對稱金鑰**,不重複使用。
-- **認證只實作 KSeF token,不做 XAdES 憑證簽章**。token 在測試環境可直接取得,XAdES 複雜度高且非展示重點。
+- **認證改用 XAdES 自簽憑證,不用 KSeF token**(偏離原設計,見下)。
+
+### 偏離原設計:認證方式
+
+原設計為「只實作 KSeF token,不做 XAdES」,理由是 token 在測試環境可直接取得。**實作前的探測推翻了這個前提**:
+
+- KSeF 2.0 的 token 必須在**已認證的 session 內**產生(`POST /tokens`),或由人登入網頁介面產生。也就是說,**第一次認證不可能用 token 完成**。
+- 若採 token,每位使用者都得先手動上網頁產生一組、再貼進 `.env`,專案就無法「clone 下來直接跑」。
+- 而 TEST 環境(**且僅限 TEST**)接受自簽憑證的 XAdES 簽章。這讓程式能自己產生一張測試用的「電子印章」憑證(`organizationIdentifier` = `VATPL-<NIP>`),無人介入完成認證。
+
+**結論**:XAdES 是 TEST 環境中唯一能無人值守的路徑,複雜度也遠低於預期——`signxml` 已實作 XAdES-BES enveloped 簽章,本專案只需組出 `AuthTokenRequest` 並正確設定 RSA-SHA256 / SHA-256。實測一次通過。
+
+正式環境需要合格憑證,不在本專案範圍內。
 
 ### 為何不使用現成 SDK
 
@@ -559,9 +587,12 @@ PyPI 上已有 `ksef2`(v0.20.0)與 `ksef-python`(v0.1.0),兩者都已封裝加�
 
 ### 狀態檔
 
-- 每張送出的發票對應一筆紀錄,以**發票編號**為鍵
-- 紀錄至少包含:發票編號、KSeF 參考編號、session 識別、送出時間、目前狀態、UPO 檔案路徑
-- **參考編號在送出前寫入**,不是收到回應後才寫。未收到回應不等於未送達。
+- 每張送出的發票對應一筆紀錄,以**發票編號**為鍵(檔名將 `/` 等字元替換為 `_`)
+- 紀錄內容:發票編號、輸入內容雜湊、所送 XML 的雜湊、狀態(`sending` / `sent` / `accepted` / `rejected`)、session 參考編號、發票參考編號、KSeF 編號、UPO 路徑、錯誤訊息、更新時間
+- **紀錄在送出前寫入**(狀態 `sending`,含 session 參考編號),不是收到回應後才寫。未收到回應不等於未送達。
+- **實際送出的 XML 原樣保存**:FA(3) 內含產生時間,重新產生會得到不同的位元組與雜湊值,續傳時必須用當初那份
+- **token 一律不寫入狀態檔**,只存在記憶體
+- 狀態檔以「先寫暫存檔再改名」寫入,中途當掉不會留下半份紀錄
 - 狀態檔位置納入 `.gitignore`(可能含 KSeF 編號等識別資訊)
 
 ### UPO 的處理
@@ -574,7 +605,17 @@ UPO 是官方收據,為送件成功的唯一憑證。
 
 ### 中斷復原
 
-程式中斷後重啟,應能讀取狀態檔,對所有「已送出但未取得 UPO」的紀錄**憑參考編號續查**,而非重送。
+程式中斷後重啟,依紀錄狀態決定行為,**任何情況下都不自動重送**:
+
+| 紀錄狀態 | 重跑時的行為 |
+|---|---|
+| 無紀錄 | 正常送件 |
+| `sending`(送出後沒收到回應,手上沒有發票參考編號) | 列出該 session 的所有發票(跟隨分頁),**以發票雜湊值比對**。找到 → 續查;找不到 → 停下並回報「不確定」,交由人判斷 |
+| `sent` | 以參考編號繼續輪詢 |
+| `accepted` / `rejected` | 直接回傳紀錄,不發出任何請求 |
+| 同編號但輸入內容不同 | 拒絕(衝突),KSeF 編號是按文件發的,不能覆蓋 |
+
+原設計只考慮「有參考編號」的情況。實作時發現最危險的其實是**送出請求已發出、回應沒回來**——此時手上沒有參考編號,只能靠雜湊值去查。
 
 ---
 
@@ -605,7 +646,8 @@ UPO 是官方收據,為送件成功的唯一憑證。
 ### 安全
 
 - token、金鑰、憑證**不得寫入程式碼,不得 commit**
-- 使用環境變數搭配 `.env`,`.env` **須**列入 `.gitignore`
+- 測試身分(私鑰與自簽憑證)存於 `certs/`,私鑰權限 600;`certs/`、`state/`、`*.pem`、`*.key`、`*.upo.xml`、`.env` 皆列入 `.gitignore`
+- 物件的 `repr` 會遮蔽金鑰(`SessionKey`、`TestIdentity`),避免在錯誤訊息或日誌中外洩
 - 本專案將公開於 GitHub,金鑰一旦進入 git 歷史即無法真正移除
 
 ---
@@ -650,6 +692,7 @@ UPO 是官方收據,為送件成功的唯一憑證。
 | XML | lxml | 成熟,XSD 驗證支援完整 |
 | Schematron | **saxonche** | **關鍵**:EN16931 Schematron 需 XSLT 2.0,lxml 僅支援 1.0 |
 | 加密 | cryptography | AES-CBC 與 RSA-OAEP 的標準選擇 |
+| XAdES 簽章 | signxml | 已實作 XAdES-BES enveloped 簽章與驗章(Apache-2.0) |
 | HTTP | httpx | 逾時與重試控制完整,且有 respx 可 mock |
 | HTTP mock | respx | 讓 `ksef` 模組可離線測試 |
 | 測試 | pytest | marker 機制符合分層測試需求 |
@@ -666,7 +709,8 @@ UPO 是官方收據,為送件成功的唯一憑證。
 - 僅連接沙箱,未經正式環境驗證
 - 欄位對應涵蓋常見情境,非 FA(3) 完整規格
 - **未涵蓋貸項通知單與更正發票(KOR)**——此在波蘭為重要場景
-- **認證僅實作 KSeF token,未實作 XAdES 憑證簽章**
+- **認證僅支援 TEST 環境的自簽憑證**;正式環境所需的合格憑證不在範圍內
+- **僅支援 TEST 環境**:base URL 寫死,沒有切換到正式環境的選項
 - **UPO 僅儲存,不驗證其 XAdES 簽章**
 - 僅互動模式,未實作批次模式
 - 不支援明細層級折讓與附加費(BG-27 / BG-28)
