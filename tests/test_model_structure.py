@@ -206,8 +206,9 @@ class TestFloatIsRefusedAtTheBoundary:
             a_line(net_amount=contaminated)
 
     def test_decimal_and_str_remain_acceptable(self):
-        assert a_line(unit_price=Decimal("0.1")).unit_price == Decimal("0.1")
-        assert a_line(unit_price="0.1").unit_price == Decimal("0.1")
+        line = a_line(unit_price=Decimal("0.1"), net_amount=Decimal("0.20"))
+        assert line.unit_price == Decimal("0.1")
+        assert a_line(unit_price="0.1", net_amount="0.20").unit_price == Decimal("0.1")
 
 
 class TestAllowanceCharge:
@@ -248,3 +249,39 @@ class TestInvoiceTypeCode:
         # BR-CL-01, so accepting it would guarantee an invalid output.
         with pytest.raises(ValueError):
             InvoiceTypeCode("381")
+
+
+class TestLineNetAmountMatchesQuantityTimesPrice:
+    """No official rule relates BT-131 to BT-129 x BT-146.
+
+    In general it cannot: line-level allowances (BG-27/28) and a base quantity
+    (BT-149) break the identity. This model supports neither, so here the
+    identity is exact, and a stated amount that disagrees with it is an input
+    error worth reporting rather than overriding.
+    """
+
+    def test_a_mismatch_is_rejected(self):
+        with pytest.raises(ValidationError, match="net_amount"):
+            a_line(
+                quantity=Decimal("2"),
+                unit_price=Decimal("10.00"),
+                net_amount=Decimal("25.00"),
+            )
+
+    def test_sub_cent_products_round_half_up(self):
+        # 1 x 0.125 is 0.13 half-up and 0.12 half-even: same policy as every
+        # other amount, and the example that tells the two apart.
+        line = a_line(
+            quantity=Decimal("1"),
+            unit_price=Decimal("0.125"),
+            net_amount=Decimal("0.13"),
+        )
+        assert line.net_amount == Decimal("0.13")
+
+    def test_the_half_even_answer_is_refused(self):
+        with pytest.raises(ValidationError, match="net_amount"):
+            a_line(
+                quantity=Decimal("1"),
+                unit_price=Decimal("0.125"),
+                net_amount=Decimal("0.12"),
+            )

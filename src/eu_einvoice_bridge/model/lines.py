@@ -4,7 +4,7 @@ from typing import Annotated, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .enums import VatCategory
-from .numeric import Amount, ExactDecimal
+from .numeric import Amount, ExactDecimal, money
 
 # Rates are fractions: 0.23 means 23%. The upper bound catches the percentage
 # mistake -- 23 would otherwise compute 2300% tax without complaint.
@@ -22,6 +22,22 @@ def _check_category_rate(category: VatCategory, rate: Decimal) -> None:
         raise ValueError(
             f"vat_rate: VAT category {category.value} requires a rate of zero, "
             f"got {rate}"
+        )
+
+
+def _check_net_amount(quantity: Decimal, unit_price: Decimal, net: Decimal) -> None:
+    """A line's net amount must equal quantity x unit price, to the cent.
+
+    No official rule checks this, because line-level allowances and a base
+    quantity break the identity in general. This model supports neither, so
+    here it is exact -- and a stated amount that disagrees is an input error
+    to report, not something to overwrite with the computed value.
+    """
+    expected = money(quantity * unit_price)
+    if net != expected:
+        raise ValueError(
+            f"net_amount: expected quantity x unit_price = {expected} "
+            f"({quantity} x {unit_price}, rounded half-up to the cent), got {net}"
         )
 
 
@@ -63,11 +79,12 @@ class LineItem(BaseModel):
     exemption_reason_code: str | None = None
 
     @model_validator(mode="after")
-    def _category_constraints(self) -> Self:
+    def _line_constraints(self) -> Self:
         _check_category_rate(self.vat_category, self.vat_rate)
         _check_exemption_reason(
             self.vat_category, self.exemption_reason, self.exemption_reason_code
         )
+        _check_net_amount(self.quantity, self.unit_price, self.net_amount)
         return self
 
 
