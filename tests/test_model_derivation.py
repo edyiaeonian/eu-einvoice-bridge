@@ -401,3 +401,8 @@ class TestTheInvoiceCannotDriftFromItsTotals:
         invoice = an_invoice()
         with pytest.raises(ValidationError):
             invoice.model_copy(update={"prepaid_amount": Decimal("0.005")})
+
+
+def test_a_huge_prepaid_amount_fails_validation_rather_than_crashing():
+    with pytest.raises(ValidationError):
+        an_invoice(prepaid_amount=Decimal("1E+30"))

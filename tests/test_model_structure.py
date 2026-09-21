@@ -285,3 +285,28 @@ class TestLineNetAmountMatchesQuantityTimesPrice:
                 unit_price=Decimal("0.125"),
                 net_amount=Decimal("0.12"),
             )
+
+
+class TestHugeNumbersFailValidationRatherThanCrash:
+    """quantize() raises decimal.InvalidOperation past 28 digits of precision.
+
+    That is an ArithmeticError, not a ValueError, so Pydantic does not turn it
+    into a ValidationError: it escaped as a traceback. Bounding the digits at
+    the boundary stops it before any arithmetic runs.
+    """
+
+    @pytest.mark.parametrize("field", ["quantity", "unit_price", "net_amount"])
+    @pytest.mark.parametrize("value", ["1E+30", "1E+999999"])
+    def test_line_fields(self, field, value):
+        with pytest.raises(ValidationError) as exc:
+            a_line(**{field: Decimal(value)})
+        assert exc.value.errors()[0]["loc"] == (field,)
+
+    def test_allowance_amount(self):
+        with pytest.raises(ValidationError):
+            AllowanceCharge(
+                is_charge=False,
+                amount=Decimal("1E+30"),
+                vat_category=VatCategory.STANDARD,
+                vat_rate=Decimal("0.23"),
+            )

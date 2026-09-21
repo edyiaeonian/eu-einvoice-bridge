@@ -14,7 +14,7 @@ from pydantic import (
 
 from .enums import InvoiceTypeCode, VatCategory
 from .lines import AllowanceCharge, LineItem, VatRate
-from .numeric import Amount, money
+from .numeric import MAX_DIGITS, Amount, money
 from .parties import Party
 
 CurrencyCode = Annotated[
@@ -78,7 +78,9 @@ class Invoice(BaseModel):
     buyer: Party
     lines: tuple[LineItem, ...] = Field(min_length=1)
     allowance_charges: tuple[AllowanceCharge, ...] = ()
-    prepaid_amount: Amount = Field(default=Decimal("0.00"), ge=0)  # BT-113, BR-DEC-16
+    prepaid_amount: Amount = Field(
+        default=Decimal("0.00"), ge=0, max_digits=MAX_DIGITS
+    )  # BT-113, BR-DEC-16
 
     @field_validator("vat_accounting_currency")
     @classmethod

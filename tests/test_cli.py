@@ -221,3 +221,18 @@ class TestWarningsDoNotFail:
         assert code == 0
         assert out.exists()
         assert "UBL-CR-601" in output
+
+
+class TestHugeNumbers:
+    """Past Decimal's 28-digit precision, quantize() raised an ArithmeticError
+    that Pydantic does not convert, so it surfaced as a traceback -- with exit
+    code 1, indistinguishable to a script from an invalid invoice."""
+
+    @pytest.mark.parametrize("field", ["quantity", "unit_price", "net_amount"])
+    def test_reported_as_a_model_error_not_a_crash(self, tmp_path, capsys, field):
+        payload = json.loads(json.dumps(VALID_INVOICE))
+        payload["lines"][0][field] = "1E+30"
+        code, output = run(capsys, "validate", write(tmp_path, payload))
+        assert code == 1
+        assert "Traceback" not in output
+        assert f"lines.0.{field}" in output

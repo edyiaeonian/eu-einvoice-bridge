@@ -5,6 +5,13 @@ from pydantic import AfterValidator, BeforeValidator
 
 CENTS = Decimal("0.01")
 
+# Upper bound on the digits of any numeric input. Decimal's default context has
+# 28 digits of precision, and quantize() past that raises InvalidOperation -- an
+# ArithmeticError Pydantic does not convert, so "1E+30" crashed the CLI instead
+# of being reported. Eighteen digits leaves room for sums and products of
+# bounded inputs while being far beyond any real invoice.
+MAX_DIGITS = 18
+
 
 def money(value: Decimal) -> Decimal:
     """Round a monetary amount to two decimals, half away from zero.
