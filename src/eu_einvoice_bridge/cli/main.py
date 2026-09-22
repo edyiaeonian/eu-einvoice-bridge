@@ -5,9 +5,10 @@ was read but is not acceptable, 2 means it could not be read at all. Conflating
 them would make the difference between "fix your invoice" and "fix your file"
 invisible to a script.
 
-submit adds two more: 3 means KSeF is still processing the invoice (run the
-same command again to pick it up), 4 means the submission itself failed --
-KSeF refused the session, the network went away, or a previous send cannot be
+submit adds two more. 3 means the invoice is in KSeF and only following it up
+is unfinished -- still processing, or accepted with the UPO not yet downloaded;
+running the same command again picks it up. 4 means the submission itself
+failed: authentication, a refused request, or a previous send that cannot be
 accounted for.
 """
 
@@ -148,6 +149,10 @@ def _submit_command(args) -> int:
         print(format_issues(path.name, issues_from_pydantic(exc)), end="")
         return EXIT_INVALID
 
+    # Hashed before the seller is replaced: the record must follow the user's
+    # invoice, not whichever test identity happens to be on disk.
+    source_hash = hashlib.sha256(invoice.model_dump_json().encode()).hexdigest()
+
     identity_dir = Path(args.identity_dir)
     identity = ksef.load_identity(identity_dir)
     if identity is None:
@@ -176,7 +181,6 @@ def _submit_command(args) -> int:
     if issues:
         print(format_issues(path.name, issues), end="", file=sys.stderr)
 
-    source_hash = hashlib.sha256(invoice.model_dump_json().encode()).hexdigest()
     store = ksef.StateStore(Path(args.state_dir), clock=lambda: datetime.now(timezone.utc))
     polling = ksef.Polling(timeout_seconds=args.timeout)
     try:
@@ -204,11 +208,24 @@ def _submit_command(args) -> int:
     if record.status == "rejected":
         print(f"{path.name}: rejected by KSeF TEST\n  {record.error}")
         return EXIT_INVALID
-    print(
-        f"{path.name}: sent, still processing after {args.timeout:g}s "
-        f"(session {record.session_reference}); run the same command again to check",
-        file=sys.stderr,
-    )
+    if record.ksef_number:
+        print(
+            f"{path.name}: accepted by KSeF TEST as {record.ksef_number}, but the UPO "
+            f"could not be downloaded ({record.error}); run the same command again to fetch it",
+            file=sys.stderr,
+        )
+    elif record.error:
+        print(
+            f"{path.name}: sent (session {record.session_reference}), but checking its "
+            f"status failed ({record.error}); run the same command again",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"{path.name}: sent, still processing after {args.timeout:g}s "
+            f"(session {record.session_reference}); run the same command again to check",
+            file=sys.stderr,
+        )
     return EXIT_PENDING
 
 

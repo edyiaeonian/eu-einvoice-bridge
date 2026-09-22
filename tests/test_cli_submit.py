@@ -143,3 +143,29 @@ def test_a_failed_submission_exits_4(workdir, sent, capsys):
     result["value"] = SubmissionUncertain("sent without an answer; it has not been resent")
     assert main(argv(workdir, invoice_file(workdir), "--test-seller")) == 4
     assert "not been resent" in capsys.readouterr().err
+
+
+def test_the_source_hash_does_not_depend_on_the_test_identity(tmp_path, sent):
+    # --test-seller rewrites the seller; a new identity must not make the same
+    # invoice look like different content.
+    calls, result = sent
+    result["value"] = accepted()
+    path = invoice_file(tmp_path)
+    for name in ("first", "second"):
+        main(["submit", str(path), "--state-dir", str(tmp_path / "state"),
+              "--identity-dir", str(tmp_path / name), "--test-seller"])
+    assert calls[0]["xml"] != calls[1]["xml"]  # different seller NIP in the XML
+    assert calls[0]["source_hash"] == calls[1]["source_hash"]
+
+
+def test_accepted_without_a_upo_exits_3_not_4(workdir, sent, capsys):
+    _, result = sent
+    result["value"] = Submission(
+        invoice_number="FV/2026/002", source_hash="s", invoice_hash="h", status="sent",
+        session_reference="SESSION", ksef_number="1234567890-20260921-ABCDEF000000-01",
+        error="GET /upo: HTTP 503",
+    )
+    assert main(argv(workdir, invoice_file(workdir), "--test-seller")) == 3
+    err = capsys.readouterr().err
+    assert "1234567890-20260921-ABCDEF000000-01" in err
+    assert "fetch it" in err

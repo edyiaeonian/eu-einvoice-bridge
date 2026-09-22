@@ -11,6 +11,9 @@ On a rerun the record decides what happens:
 - sending, with no reference: the session is searched for the invoice's hash,
   and only if it is there does the run continue -- it is never resent
 - sent: status polling resumes where it stopped
+- refused (KSeF turned the send request down) or rejected (KSeF checked the
+  invoice and refused it): nothing is held by KSeF, so a corrected invoice may
+  be sent under the same number
 
 Tokens are held in memory only and never written to the record.
 """
@@ -53,13 +56,20 @@ class Submission:
     invoice_number: str
     source_hash: str  # of the input document, to spot a changed invoice
     invoice_hash: str  # of the exact FA(3) bytes sent, which KSeF lists
-    status: str  # sending | sent | accepted | rejected
+    status: str  # sending | sent | accepted | rejected | refused
     session_reference: str | None = None
     invoice_reference: str | None = None
     ksef_number: str | None = None
     upo_path: str | None = None
     error: str | None = None
     updated_at: str | None = None
+    # The NIP that authenticated. KSeF ties a session to it, so only that
+    # identity can look the invoice up again.
+    seller_nip: str | None = None
+
+
+# KSeF may hold, or come to hold, the invoice: the number is taken.
+_IN_KSEF = frozenset({"sending", "sent", "accepted"})
 
 
 class StateStore:
@@ -169,9 +179,10 @@ def _send(
             f"it will not be resent"
         ) from exc
     except KsefError as exc:
-        # A 4xx is an answer: KSeF refused the request, so nothing was accepted.
-        store.save(replace(record, status="rejected", error=f"{exc}: {exc.body}"))
-        raise SubmissionError(f"KSeF refused the invoice: {exc} {exc.body}") from exc
+        # A 4xx is an answer: the request was turned down and KSeF holds
+        # nothing. Unlike an unanswered send, trying again is safe.
+        store.save(replace(record, status="refused", error=f"{exc}: {exc.body}"))
+        raise SubmissionError(f"KSeF refused the send request: {exc} {exc.body}") from exc
     return store.save(replace(record, status="sent", invoice_reference=reference))
 
 
@@ -203,12 +214,13 @@ def _await_result(
         result = client.invoice_status(record.session_reference, record.invoice_reference, access_token)
         code = result["status"]["code"]
         if code == _SUCCESS:
+            # Saved before the download: if that fails, the number is not lost
+            # and a rerun only has to fetch the UPO.
+            record = store.save(replace(record, ksef_number=result.get("ksefNumber")))
             upo = client.download_upo(record.session_reference, record.invoice_reference, access_token)
             upo_path = store.upo_path(record.invoice_number)
             upo_path.write_bytes(upo)
-            return store.save(replace(
-                record, status="accepted", ksef_number=result.get("ksefNumber"), upo_path=str(upo_path),
-            ))
+            return store.save(replace(record, status="accepted", upo_path=str(upo_path), error=None))
         if code >= 300:
             details = "; ".join(result["status"].get("details") or [])
             return store.save(replace(
@@ -238,17 +250,32 @@ def submit(
 
     render() is called only for a new submission; a resumed one reuses the
     bytes stored when it was first sent.
+
+    Once the invoice has been sent, a failure that retrying could fix does not
+    raise: the record is returned still "sent", with the reason in `error`, so
+    the caller knows a rerun will pick it up.
     """
     polling = polling or Polling()
     record = store.load(invoice_number)
 
     if record is not None and record.source_hash != source_hash:
-        raise SubmissionConflict(
-            f"invoice {invoice_number} was already submitted with different content; "
-            f"KSeF numbers are per document, so it will not be replaced"
-        )
+        if record.status in _IN_KSEF:
+            raise SubmissionConflict(
+                f"invoice {invoice_number} was already submitted with different content; "
+                f"KSeF numbers are per document, so it will not be replaced"
+            )
+        record = None  # rejected or refused: KSeF holds nothing, so start over
     if record is not None and record.status in ("accepted", "rejected"):
         return record
+    if record is not None and record.status == "refused":
+        record = None  # the request was turned down; sending again is safe
+    if record is not None and record.seller_nip not in (None, identity.nip):
+        raise SubmissionError(
+            f"invoice {invoice_number} was sent as NIP {record.seller_nip}, but the "
+            f"test identity is now NIP {identity.nip}. KSeF only shows a session to "
+            f"the identity that opened it, so the original identity is needed to "
+            f"follow this invoice up; restore it (--identity-dir) rather than resend"
+        )
 
     access_token = authenticate(client, identity, sleep=sleep, polling=polling)
     opened_now = False
@@ -263,13 +290,18 @@ def submit(
             source_hash=source_hash,
             invoice_hash=crypto.sha256_b64(invoice_xml),
             status="new",
+            seller_nip=identity.nip,
         )
         record = _send(client, store, access_token, record, invoice_xml)
         opened_now = True
     elif record.status == "sending":
         record = _recover(client, store, access_token, record)
 
-    record = _await_result(client, store, access_token, record, sleep=sleep, polling=polling)
+    try:
+        record = _await_result(client, store, access_token, record, sleep=sleep, polling=polling)
+    except TransientError as exc:
+        # The invoice is in KSeF; only following it up failed.
+        return store.save(replace(store.load(invoice_number), error=str(exc)))
 
     if opened_now and record.status in ("accepted", "rejected"):
         try:

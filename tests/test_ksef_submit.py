@@ -241,11 +241,25 @@ class TestAnUnansweredSend:
 
 
 class TestRefusals:
-    def test_a_4xx_on_send_is_recorded_as_rejected(self, ksef, client, identity, store, sleeps):
+    def test_a_4xx_on_send_is_a_refused_request_not_a_rejected_invoice(
+        self, ksef, client, identity, store, sleeps
+    ):
+        # KSeF never looked at the invoice: an expired token or a malformed
+        # request says nothing about its content.
         ksef["send"].respond(400, json={"exception": "bad"})
         with pytest.raises(SubmissionError, match="refused"):
             run(client, identity, store, sleeps)
-        assert store.load(NUMBER).status == "rejected"
+        assert store.load(NUMBER).status == "refused"
+
+    def test_a_refused_send_may_be_sent_again(self, ksef, client, identity, store, sleeps):
+        ksef["send"].mock(side_effect=[
+            httpx.Response(401),
+            httpx.Response(202, json={"referenceNumber": INVOICE_REF}),
+        ])
+        with pytest.raises(SubmissionError):
+            run(client, identity, store, sleeps)
+        assert run(client, identity, store, sleeps).status == "accepted"
+        assert ksef["send"].call_count == 2
 
     def test_a_rejected_invoice_keeps_the_reason(self, ksef, client, identity, store, sleeps):
         ksef["status"].mock(side_effect=None, return_value=httpx.Response(200, json={"status": {
@@ -309,12 +323,18 @@ class TestRetries:
 
     def test_retries_give_up_after_the_limit(self, ksef, client, identity, store, sleeps):
         ksef["upo"].respond(503)
-        ksef["status"].mock(side_effect=None, return_value=httpx.Response(200, json=status(200)))
-        with pytest.raises(TransientError):
-            run(client, identity, store, sleeps)
+        ksef["status"].mock(
+            side_effect=None,
+            return_value=httpx.Response(200, json=status(200, ksefNumber=KSEF_NUMBER)),
+        )
+        result = run(client, identity, store, sleeps)
         assert ksef["upo"].call_count == 4  # the first try and three retries
-        # Still "sent", so a later run picks it up again rather than resending.
-        assert store.load(NUMBER).status == "sent"
+        # Accepted, but without its receipt: still "sent", so a rerun only has
+        # to fetch the UPO -- and the KSeF number is already kept.
+        assert result.status == "sent"
+        assert result.ksef_number == KSEF_NUMBER
+        assert "503" in result.error
+        assert store.load(NUMBER) == result
 
     def test_a_4xx_is_not_retried(self, ksef, client, identity, store, sleeps):
         ksef["status"].mock(side_effect=None, return_value=httpx.Response(404))
@@ -326,3 +346,80 @@ class TestRetries:
     def test_a_failed_close_does_not_fail_an_accepted_invoice(self, ksef, client, identity, store, sleeps):
         ksef["close"].respond(400)
         assert run(client, identity, store, sleeps).status == "accepted"
+
+
+class TestAfterAFailedUpoDownload:
+    def test_a_rerun_fetches_the_upo_without_resending(self, ksef, client, identity, store, sleeps):
+        ksef["upo"].respond(503)
+        ksef["status"].mock(
+            side_effect=None,
+            return_value=httpx.Response(200, json=status(200, ksefNumber=KSEF_NUMBER)),
+        )
+        run(client, identity, store, sleeps)
+
+        ksef["upo"].respond(200, content=UPO)
+        result = run(client, identity, store, sleeps, render=pytest.fail)
+        assert result.status == "accepted"
+        assert result.error is None
+        assert store.upo_path(NUMBER).read_bytes() == UPO
+        assert ksef["send"].call_count == 1
+
+
+class TestCorrectingARejectedInvoice:
+    """A rejected invoice holds no KSeF number, so its number is free again."""
+
+    @pytest.fixture
+    def rejected_once(self, ksef):
+        ksef["status"].mock(side_effect=[
+            httpx.Response(200, json=status(450, "Błąd weryfikacji semantyki")),
+            httpx.Response(200, json=status(200, ksefNumber=KSEF_NUMBER)),
+        ])
+        return ksef
+
+    def test_the_corrected_invoice_is_sent_under_the_same_number(
+        self, rejected_once, client, identity, store, sleeps
+    ):
+        assert run(client, identity, store, sleeps).status == "rejected"
+        fixed = b"<Faktura>fixed</Faktura>"
+        result = run(client, identity, store, sleeps, source="source-hash-2", render=lambda: fixed)
+        assert result.status == "accepted"
+        assert result.invoice_hash == crypto.sha256_b64(fixed)
+        assert store.xml_path(NUMBER).read_bytes() == fixed
+        assert rejected_once["send"].call_count == 2
+
+    def test_the_same_rejected_content_is_not_sent_again(
+        self, rejected_once, client, identity, store, sleeps
+    ):
+        run(client, identity, store, sleeps)
+        calls = len(rejected_once.calls)
+        assert run(client, identity, store, sleeps).status == "rejected"
+        assert len(rejected_once.calls) == calls
+
+    def test_changing_an_invoice_still_in_flight_is_a_conflict(self, ksef, client, identity, store, sleeps):
+        ksef["status"].mock(side_effect=None, return_value=httpx.Response(200, json=status(150)))
+        run(client, identity, store, sleeps, polling=Polling(timeout_seconds=0))
+        assert store.load(NUMBER).status == "sent"
+        with pytest.raises(SubmissionConflict):
+            run(client, identity, store, sleeps, source="source-hash-2")
+
+
+class TestTheIdentityThatSent:
+    def test_is_recorded(self, ksef, client, identity, store, sleeps):
+        assert run(client, identity, store, sleeps).seller_nip == identity.nip
+
+    def test_a_different_identity_cannot_follow_up_and_says_why(
+        self, ksef, client, identity, store, sleeps
+    ):
+        ksef["status"].mock(side_effect=None, return_value=httpx.Response(200, json=status(150)))
+        run(client, identity, store, sleeps, polling=Polling(timeout_seconds=0))
+        calls = len(ksef.calls)
+
+        other = create_test_identity()
+        with pytest.raises(SubmissionError, match=f"sent as NIP {identity.nip}") as raised:
+            run(client, other, store, sleeps)
+        assert not isinstance(raised.value, SubmissionConflict)
+        assert len(ksef.calls) == calls  # stopped before authenticating
+
+    def test_a_finished_invoice_needs_no_identity(self, ksef, client, identity, store, sleeps):
+        run(client, identity, store, sleeps)
+        assert run(client, create_test_identity(), store, sleeps).status == "accepted"
