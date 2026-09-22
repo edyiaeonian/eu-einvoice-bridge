@@ -1,6 +1,7 @@
 # EU E-Invoice Bridge
 
 [![CI](https://github.com/edyiaeonian/eu-einvoice-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/edyiaeonian/eu-einvoice-bridge/actions/workflows/ci.yml)
+[![KSeF TEST](https://github.com/edyiaeonian/eu-einvoice-bridge/actions/workflows/integration.yml/badge.svg)](https://github.com/edyiaeonian/eu-einvoice-bridge/actions/workflows/integration.yml)
 
 Turning one neutral invoice into two things at once: an **EN16931** invoice in UBL 2.1
 syntax, and the **FA(3)** XML that Poland's KSeF requires.
@@ -199,11 +200,28 @@ would give a different hash.
 | `0` | Accepted; UPO saved |
 | `1` | The invoice is wrong — locally, or KSeF rejected it (with its reason) |
 | `2` | The file could not be read |
-| `3` | Sent and still processing — run the same command again |
-| `4` | The submission failed: network, authentication, or a previous send that cannot be accounted for |
+| `3` | The invoice is in KSeF and only the follow-up is unfinished — still processing, or accepted with the UPO not yet downloaded. Run the same command again |
+| `4` | The submission failed: authentication, a refused request, or a previous send that cannot be accounted for |
 
 KSeF accepts invoices only from the NIP that authenticated. Without `--test-seller`,
 a different seller is refused before anything is sent.
+
+A number is taken only while KSeF may hold the invoice. If KSeF rejects it, or
+turns the send request down (a 4xx: it never looked at the invoice), a corrected
+version can go out under the same number. Changing an invoice that is still in
+flight or already accepted is refused as a conflict.
+
+### Checks no validator makes
+
+The FA(3) schema accepts any rate code with any buyer, and KSeF does not tie the
+two together either. So an intra-EU supply (`0 WDT`) invoiced to a Polish company
+is valid XML — and wrong. The mapping layer checks what the law makes checkable:
+
+| Code | Rule | Severity |
+|---|---|---|
+| `0 WDT` | Buyer needs a VAT number from another member state | error |
+| `oo` | Domestic reverse charge: buyer needs a Polish NIP. Cross-border it is `np I` or `np II`, depending on whether the supply is a service under art. 100(1)(4) — which the model does not record, so it refuses rather than guess | error |
+| `0 EX` | Buyer in Poland: legal (export turns on the goods leaving the EU, not on the buyer), but unusual | warning |
 
 ## Architecture
 
@@ -247,6 +265,9 @@ python3 -m venv .venv
 ./.venv/bin/pip install -e ".[dev]"
 ./.venv/bin/pytest
 
+# Or, with the exact versions CI tests against (uv.lock):
+uv sync --locked --extra dev
+
 ./.venv/bin/einvoice validate examples/invoice.json
 ./.venv/bin/einvoice convert examples/invoice.json -o invoice.xml
 
@@ -283,6 +304,21 @@ sandbox outage never turns the suite red:
 
 KSeF TEST is shared by every integrator, so the test uses a random identity and
 buyer each run. It is down for maintenance 16:00–18:00 Warsaw time.
+
+That same test also runs on GitHub Actions every morning ([KSeF TEST](.github/workflows/integration.yml)),
+so a change on KSeF's side shows up within a day. It needs no secrets, and it is a
+separate workflow so that a sandbox outage never turns the main CI badge red.
+
+### Development checks
+
+```bash
+ruff check src tests    # lint
+mypy                    # strict, over src
+```
+
+CI runs both, and installs from `uv.lock` with `--locked`: `pyproject.toml` states
+only lower bounds, so without the lock a new major release of `signxml` or
+`saxonche` could break CI with no change to this code.
 
 ### Troubleshooting: keep the venv out of iCloud Drive
 
