@@ -271,7 +271,8 @@ class TestFa3Output:
         assert "FA(3)" in output
 
     def test_an_unmappable_invoice_is_refused_with_every_reason(self, tmp_path, capsys):
-        # invoice.json carries a document-level allowance and no declarations.
+        # invoice.json carries a document-level allowance, no declarations, and
+        # a reverse-charge service to a German buyer, which FA(3)'s oo cannot hold.
         out = tmp_path / "out.xml"
         code, output = run(
             capsys, "convert", str(UBL_ONLY_EXAMPLE), "--format", "fa3", "-o", str(out)
@@ -280,6 +281,7 @@ class TestFa3Output:
         assert not out.exists()
         assert "FA3-NO-DECLARATIONS" in output
         assert "FA3-DOC-ALLOWANCE" in output
+        assert "FA3-OO-BUYER" in output
         assert "FA(3) mapping" in output
 
     def test_warnings_are_shown_and_the_file_is_still_written(self, tmp_path, capsys):

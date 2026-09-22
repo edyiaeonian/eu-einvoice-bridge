@@ -17,14 +17,14 @@
     }
   },
   "buyer": {
-    "name": "Buyer sp. z o.o.",
-    "vat_id": "PL1111111111",
-    "vat_scheme": "PL",
+    "name": "Kunde GmbH",
+    "vat_id": "DE123456789",
+    "vat_scheme": "DE",
     "address": {
-      "street": "ul. Prosta 2",
-      "city": "Krakow",
-      "postal_code": "30-001",
-      "country": "PL"
+      "street": "Friedrichstrasse 10",
+      "city": "Berlin",
+      "postal_code": "10117",
+      "country": "DE"
     }
   },
   "lines": [
@@ -48,7 +48,7 @@
       "net_amount": "600.00",
       "vat_category": "AE",
       "vat_rate": "0",
-      "exemption_reason": "Reverse charge"
+      "exemption_reason": "Reverse charge: service taxed where the buyer is established (Art. 196 VAT Directive)"
     }
   ],
   "allowance_charges": [

@@ -6,19 +6,20 @@
 Turning one neutral invoice into two things at once: an **EN16931** invoice in UBL 2.1
 syntax, and the **FA(3)** XML that Poland's KSeF requires.
 
-## Status
+- **One neutral model, two outputs** — EN16931 UBL and Poland's FA(3), each validated
+  offline against the official schemas and Schematron rules
+- **Every mismatch between the two standards gets a deliberate answer** — including
+  refusing to emit a file that is certain to be rejected
+- **Checks no validator makes** — a tax code that contradicts the buyer is valid XML
+  that the schema and KSeF both accept; this refuses it
+- **Submits to Poland's real KSeF TEST environment daily in CI, with no secrets** — a
+  self-signed identity is created per run
+- **An unanswered send is never retried** — interrupted submissions resume from a
+  local record
 
-| Phase | Scope | Status |
-|---|---|---|
-| 1 | Neutral model, UBL serializer, validation chain, CLI error report | ✅ complete |
-| 2 | FA(3) serializer, mismatch handling, multi-currency | ✅ complete |
-| 3 | Encryption, KSeF client, UPO retrieval | ✅ complete — verified live against KSeF TEST |
-
-See the plans for [phase 1](docs/plans/2026-09-20-phase1-implementation-plan.md)
-and [phase 2](docs/plans/2026-09-21-phase2-implementation-plan.md), and the
-[phase 3 record](docs/plans/2026-09-21-phase3-implementation-record.md).
-
----
+All three phases are complete: [validation pipeline](docs/plans/2026-09-20-phase1-implementation-plan.md),
+[FA(3) and mismatch handling](docs/plans/2026-09-21-phase2-implementation-plan.md),
+[KSeF submission](docs/plans/2026-09-21-phase3-implementation-record.md).
 
 ## Why this exists
 
@@ -133,15 +134,18 @@ block the output, warnings name what would be left behind:
 
 ```
 $ einvoice convert invoice.json --format fa3
-invoice.json: 2 problems, 2 warnings
+invoice.json: 3 problems, 2 warnings
 
-FA(3) mapping (2 errors, 2 warnings)
+FA(3) mapping (3 errors, 2 warnings)
   FA3-NO-DECLARATIONS
     at extras
     FA(3) requires the Polish statutory declarations -- JST, GV and the Adnotacje ...
   FA3-DOC-ALLOWANCE  BG-20, BG-21
     at allowance_charges
     document-level allowances and charges change the tax base (BR-S-08) and FA(3) ...
+  FA3-OO-BUYER  BT-48, BT-151
+    at buyer.vat_id
+    FA(3) reverse charge (oo, P_13_10) is the domestic procedure, with a Polish ...
   FA3-DROP-BT30  (warning)  BT-30
     at seller.legal_registration_id
     ...
@@ -150,6 +154,10 @@ FA(3) mapping (2 errors, 2 warnings)
     ...
 no output written
 ```
+
+The third error is one [no validator makes](#checks-no-validator-makes): the
+consulting line is a reverse-charge service to a German company — correct in
+EN16931, but FA(3)'s `oo` is the *domestic* procedure.
 
 Exit codes separate the two questions a caller has: `0` valid, `1` the invoice is
 wrong, `2` the file could not be read at all.
@@ -177,23 +185,20 @@ Three decisions carry most of the weight:
 
 **Authentication is an XAdES signature with a self-signed certificate.** The plan was
 a KSeF token, until the API showed that tokens can only be created *after*
-authenticating — so a token can never be the first step. KSeF's TEST environment
-(only TEST) accepts a self-signed certificate shaped like a company seal, with the
-NIP in `organizationIdentifier` as `VATPL-<NIP>`. The program makes one on first use,
-so a fresh clone can submit with no portal login and no manual setup.
+authenticating. KSeF's TEST environment (only TEST) accepts a self-signed certificate
+shaped like a company seal (`organizationIdentifier` = `VATPL-<NIP>`); the program
+makes one on first use, so a fresh clone can submit with no manual setup.
 
 **An unanswered send is never retried.** Asking for a status twice is harmless;
 sending an invoice twice is not. The client has two paths: idempotent calls are
 retried with exponential backoff, and the send, the session opening and the one-time
 token redemption are not. Making the send retryable, as a check, turns four tests red.
 
-**The record is written before the send.** The dangerous moment is a send that went
-out and got no answer: there is no reference number yet, and no way to know whether
-KSeF has the invoice. So the state file says `sending` first. On a rerun, the program
-lists the session's invoices and looks for the SHA-256 of the exact bytes it sent;
-found, it resumes polling; not found, it stops and says so rather than guess. The
-XML sent is kept too — FA(3) carries a generation timestamp, so rendering it again
-would give a different hash.
+**The record is written before the send.** A send that got no answer leaves no
+reference number and no way to know whether KSeF has the invoice. So the state file
+says `sending` first; a rerun looks for the SHA-256 of the exact bytes sent among the
+session's invoices, and resumes if found or stops and says so if not. The XML sent is
+kept, because FA(3) carries a generation timestamp and re-rendering changes the hash.
 
 | Exit code | Meaning |
 |---|---|
@@ -245,29 +250,26 @@ is valid XML — and wrong. The mapping layer checks what the law makes checkabl
 ```
 
 Both paths are validated locally before anything leaves the machine — the sandbox is
-never the first validator. Only the FA(3) path continues; the UBL output exists to
-prove conformance to the European standard, not to be submitted anywhere.
-
-Serializing and *doing something with the result* are separate modules on purpose:
-they fail for unrelated reasons — bad input data versus a sandbox that is down — and
-splitting them keeps serialization testable with no network at all.
-
-`crypto` is separate from `ksef` for the same reason. Encryption is a pure function,
-so it can be verified offline against known test vectors, and an encryption bug never
-looks like a connection bug.
+never the first validator. Modules are split where failures differ: bad data, a bad
+key and a sandbox that is down each surface in their own module, and everything up to
+`ksef` — encryption included, checked against NIST vectors — is testable offline.
 
 ## Quick start
 
-Requires Python 3.12+.
+Requires Python 3.12+. Install with either:
 
 ```bash
+# A: pip
 python3 -m venv .venv
 ./.venv/bin/pip install -e ".[dev]"
-./.venv/bin/pytest
 
-# Or, with the exact versions CI tests against (uv.lock):
+# B: uv, with the exact versions CI tests against (uv.lock)
 uv sync --locked --extra dev
+```
 
+Both create `.venv/`. Then:
+
+```bash
 ./.venv/bin/einvoice validate examples/invoice.json
 ./.venv/bin/einvoice convert examples/invoice.json -o invoice.xml
 
@@ -277,77 +279,42 @@ uv sync --locked --extra dev
 
 # Invoiced in EUR, VAT reported in PLN
 ./.venv/bin/einvoice convert examples/invoice-eur.json --format fa3
-```
 
-`examples/invoice.json` is refused for FA(3), on purpose: it carries a document-level
-allowance, which lowers the tax base in EN16931 and has no counterpart in FA(3), and
-it lacks the Polish statutory declarations. The report names both.
-
-Tests run fully offline, including the Schematron validation, because the official
-validation artefacts are vendored rather than fetched.
-
-Send an invoice to Poland's TEST environment. No account or credentials are needed:
-a self-signed test identity is created in `certs/` on first use, and records and UPOs
-go to `state/`. Both directories are git-ignored.
-
-```bash
+# Send to Poland's TEST environment -- no account or credentials needed
 ./.venv/bin/einvoice submit examples/invoice-fa3.json --test-seller
 ```
 
-The KSeF client's state machine is tested offline with mocked HTTP. The one test
-that needs the real sandbox is marked `integration` and excluded by default, so a
-sandbox outage never turns the suite red:
+`examples/invoice.json` is refused for FA(3), on purpose, for the three reasons shown
+[above](#what-it-looks-like). `submit` creates a self-signed test identity in `certs/`
+on first use and writes records and UPOs to `state/`; both are git-ignored.
+
+### Tests
 
 ```bash
-./.venv/bin/pytest -m integration
+./.venv/bin/pytest                   # offline, Schematron included
+./.venv/bin/pytest -m integration    # the real KSeF TEST environment
+./.venv/bin/ruff check src tests && ./.venv/bin/mypy    # lint, strict types
 ```
 
-KSeF TEST is shared by every integrator, so the test uses a random identity and
-buyer each run. It is down for maintenance 16:00–18:00 Warsaw time.
+The offline suite runs against vendored official artefacts and a mocked KSeF. The
+integration test runs [every morning on GitHub Actions](.github/workflows/integration.yml)
+as a separate workflow, so a sandbox outage never turns the main CI badge red. CI
+installs from `uv.lock`, so a new upstream release cannot change what is tested
+without a commit.
 
-That same test also runs on GitHub Actions every morning ([KSeF TEST](.github/workflows/integration.yml)),
-so a change on KSeF's side shows up within a day. It needs no secrets, and it is a
-separate workflow so that a sandbox outage never turns the main CI badge red.
+Something not working? See [Troubleshooting](docs/TROUBLESHOOTING.md) — including a
+silent macOS failure when the venv sits in an iCloud-synced folder.
 
-### Development checks
+## How this was built
 
-```bash
-ruff check src tests    # lint
-mypy                    # strict, over src
-```
-
-CI runs both, and installs from `uv.lock` with `--locked`: `pyproject.toml` states
-only lower bounds, so without the lock a new major release of `signxml` or
-`saxonche` could break CI with no change to this code.
-
-### Troubleshooting: keep the venv out of iCloud Drive
-
-If the `einvoice` command fails with `ModuleNotFoundError` even though `pip list`
-shows the package installed, the venv is probably inside an iCloud-synced folder —
-on macOS, Desktop and Documents are synced by default.
-
-Three things line up to produce a silent failure:
-
-1. iCloud marks the `.venv` directory with the BSD `UF_HIDDEN` flag, and the flag
-   spreads to files inside it
-2. Python 3.14's `site.py` skips hidden `.pth` files
-3. An editable install *is* a `.pth` file, so the package silently stops resolving
-
-Nothing reports an error at any step. `chflags nohidden .venv/lib/*/site-packages/*.pth`
-clears it, but iCloud re-applies the flag within minutes, so the fix is to put the
-venv somewhere that is not synced:
-
-```bash
-python3 -m venv ~/.virtualenvs/eu-einvoice-bridge
-~/.virtualenvs/eu-einvoice-bridge/bin/pip install -e ".[dev]"
-```
-
-Syncing a virtualenv is a bad idea regardless — thousands of files, none of them
-worth keeping.
-
-The test suite is unaffected either way: `pythonpath = ["src"]` in `pyproject.toml`
-puts the source tree on `sys.path` directly, so tests never depend on the editable
-install resolving.
+The code was written with an AI coding assistant (Claude Code). My part was the
+direction and the judgement calls: choosing the problem and the scope, reviewing each
+design spec and its acceptance criteria before implementation began, and putting the
+finished work through independent reviews. Review findings were verified against the
+official rules and the running code before anything changed — most were adopted, and
+where one was not, the reason is recorded (the export and cross-border reverse-charge
+checks are examples). The [phase 3 record](docs/plans/2026-09-21-phase3-implementation-record.md)
+notes where the implementation departed from the spec, and why.
 
 ## Documentation
 
@@ -359,6 +326,7 @@ install resolving.
 | [Phase 1 plan](docs/plans/2026-09-20-phase1-implementation-plan.md) | Step-by-step plan and acceptance criteria |
 | [Phase 2 plan](docs/plans/2026-09-21-phase2-implementation-plan.md) | FA(3) serializer, the four mismatch categories, multi-currency |
 | [Phase 3 record](docs/plans/2026-09-21-phase3-implementation-record.md) | KSeF submission: decisions, evidence, live run |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | macOS/iCloud venv failure, sandbox maintenance window |
 
 The design documents are written in Traditional Chinese; the spec's structure and the
 BT/BR identifiers throughout are language-independent.
