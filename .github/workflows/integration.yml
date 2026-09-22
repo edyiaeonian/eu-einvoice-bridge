@@ -1,0 +1,40 @@
+name: KSeF TEST
+
+# Submits a real invoice to Poland's KSeF TEST environment once a day, so a
+# change on KSeF's side shows up here rather than in front of a user.
+#
+# It needs no secrets: each run makes a fresh self-signed identity and random
+# NIPs (tests/test_ksef_live.py). It is a separate workflow so that a sandbox
+# outage never turns the main CI badge red.
+
+on:
+  schedule:
+    # 06:30 UTC is 08:30 in Warsaw in summer and 07:30 in winter -- well clear
+    # of KSeF TEST's daily maintenance, 16:00-18:00 Warsaw time.
+    - cron: "30 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ksef-test
+  cancel-in-progress: false
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --locked --extra dev
+
+      - name: Submit to KSeF TEST
+        run: uv run --no-sync pytest -m integration -v
