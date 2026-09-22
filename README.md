@@ -298,9 +298,10 @@ on first use and writes records and UPOs to `state/`; both are git-ignored.
 
 The offline suite runs against vendored official artefacts and a mocked KSeF. The
 integration test runs [every morning on GitHub Actions](.github/workflows/integration.yml)
-as a separate workflow, so a sandbox outage never turns the main CI badge red. CI
-installs from `uv.lock`, so a new upstream release cannot change what is tested
-without a commit.
+as a separate workflow, so a sandbox outage never turns the main CI badge red. GitHub
+pauses scheduled workflows after 60 days without repository activity; if the KSeF TEST
+badge stops updating, re-enable it from the Actions tab. CI installs from `uv.lock`, so
+a new upstream release cannot change what is tested without a commit.
 
 Something not working? See [Troubleshooting](docs/TROUBLESHOOTING.md) — including a
 silent macOS failure when the venv sits in an iCloud-synced folder.
@@ -341,7 +342,7 @@ repository's code:
 |---|---|---|
 | `assets/en16931/` | [ConnectingEurope/eInvoicing-EN16931](https://github.com/ConnectingEurope/eInvoicing-EN16931), `validation-1.3.16` | EUPL v1.2 |
 | `assets/ubl21/` | OASIS UBL 2.1 | OASIS copyright, notices retained |
-| `assets/fa3/` | [CIRFMF/ksef-docs](https://github.com/CIRFMF/ksef-docs), pinned commit | MIT, Polish Ministry of Finance |
+| `assets/fa3/` | [CIRFMF/ksef-api](https://github.com/CIRFMF/ksef-api) (formerly `ksef-docs`), pinned commit | MIT, Polish Ministry of Finance |
 
 See [`assets/README.md`](assets/README.md) for provenance, pinned versions, and how
 each copy was checked against the officially published one.

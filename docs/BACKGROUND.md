@@ -71,8 +71,7 @@
 
 | 資料 | 位置 |
 |---|---|
-| KSeF API 官方文件 | `github.com/CIRFMF/ksef-api` |
-| KSeF 補充文件與範例 | `github.com/CIRFMF/ksef-docs` |
+| KSeF API 官方文件、補充文件與範例 | `github.com/CIRFMF/ksef-api`(原本的 `CIRFMF/ksef-docs` 已併入並改名,舊網址會自動轉址;2026-09-22 確認) |
 | KSeF 測試環境 | `api-test.ksef.mf.gov.pl` |
 | EN16931 官方驗證規則 | `github.com/ConnectingEurope/eInvoicing-EN16931`(現行 v1.3.16,2026-04-10) |
 

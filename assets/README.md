@@ -81,7 +81,7 @@ EUPL 1.2 要求:
 
 | 項目 | 內容 |
 |---|---|
-| 來源 | `github.com/CIRFMF/ksef-docs`,路徑 `faktury/schemy/FA/` |
+| 來源 | `github.com/CIRFMF/ksef-docs`(現已改名為 `CIRFMF/ksef-api`,下列 commit 在新 repo 中仍存在),路徑 `faktury/schemy/FA/` |
 | 固定版本 | commit `7533a8008be0ba5a434277a2ee3b0f3d74f53693`(以雜湊值固定,不指向會變動的 `main`) |
 | 檔案 | `schemat_FA(3)_v1-0E.xsd` 與 `bazowe/` 下三個基礎 schema(v10-0E) |
 | 命名空間 | `http://crd.gov.pl/wzor/2025/06/25/13775/` |
