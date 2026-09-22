@@ -17,6 +17,9 @@ syntax, and the **FA(3)** XML that Poland's KSeF requires.
 - **An unanswered send is never retried** — interrupted submissions resume from a
   local record
 
+Write-up: [Integrating Poland's KSeF 2.0 from Python: 8 pitfalls](https://dev.to/edyiaeonian/integrating-polands-ksef-20-from-python-8-pitfalls-5g51)
+— what this project ran into, and why the code handles it the way it does.
+
 All three phases are complete: [validation pipeline](docs/plans/2026-09-20-phase1-implementation-plan.md),
 [FA(3) and mismatch handling](docs/plans/2026-09-21-phase2-implementation-plan.md),
 [KSeF submission](docs/plans/2026-09-21-phase3-implementation-record.md).
@@ -327,6 +330,7 @@ notes where the implementation departed from the spec, and why.
 | [Phase 1 plan](docs/plans/2026-09-20-phase1-implementation-plan.md) | Step-by-step plan and acceptance criteria |
 | [Phase 2 plan](docs/plans/2026-09-21-phase2-implementation-plan.md) | FA(3) serializer, the four mismatch categories, multi-currency |
 | [Phase 3 record](docs/plans/2026-09-21-phase3-implementation-record.md) | KSeF submission: decisions, evidence, live run |
+| [KSeF pitfalls article](https://dev.to/edyiaeonian/integrating-polands-ksef-20-from-python-8-pitfalls-5g51) | Eight KSeF 2.0 integration pitfalls, with code (dev.to) |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | macOS/iCloud venv failure, sandbox maintenance window |
 
 The design documents are written in Traditional Chinese; the spec's structure and the
