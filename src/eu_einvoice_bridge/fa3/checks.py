@@ -12,7 +12,7 @@ validating the output against the XSD rather than restated here.
 
 from ..model import Invoice, VatCategory
 from ..validate.issues import Severity, ValidationIssue
-from .mapping import rate_slot
+from .mapping import eu_vat_prefixes, rate_slot
 
 # FA(3) carries an exemption reason only for exempt supplies, as P_19A/B/C text.
 # The other categories that need one in EN16931 travel as a rate code alone.
@@ -114,8 +114,58 @@ def _errors(invoice: Invoice) -> list[ValidationIssue]:
     return found
 
 
+def _buyer_errors(invoice: Invoice) -> list[ValidationIssue]:
+    """The rate code must fit the buyer.
+
+    The schema accepts any code with any buyer, so an intra-EU supply to a
+    Polish company is valid XML. It is also wrong, and nothing after this
+    point would notice.
+    """
+    found = []
+    categories = {line.vat_category for line in invoice.lines}
+    vat_id = invoice.buyer.vat_id or ""
+    prefix = vat_id[:2]
+
+    if VatCategory.INTRA_COMMUNITY in categories and (
+        prefix == "PL" or prefix not in eu_vat_prefixes()
+    ):
+        found.append(_issue(
+            Severity.ERROR, "FA3-WDT-BUYER", "buyer.vat_id",
+            "an intra-Community supply (0 WDT) is zero-rated only for a buyer "
+            "identified for VAT in another member state (art. 42); the buyer "
+            "needs an EU VAT identifier that does not begin with PL",
+            "BT-48", "BT-151",
+        ))
+
+    if VatCategory.REVERSE_CHARGE in categories and prefix != "PL":
+        found.append(_issue(
+            Severity.ERROR, "FA3-OO-BUYER", "buyer.vat_id",
+            "FA(3) reverse charge (oo, P_13_10) is the domestic procedure, with a "
+            "Polish business buyer identified by NIP. Cross-border it becomes "
+            "np I or np II, depending on whether the supply is a service under "
+            "art. 100(1)(4), which this model does not record",
+            "BT-48", "BT-151",
+        ))
+
+    return found
+
+
 def _warnings(invoice: Invoice) -> list[ValidationIssue]:
     found = []
+
+    if (
+        any(line.vat_category is VatCategory.EXPORT for line in invoice.lines)
+        and invoice.buyer.address.country == "PL"
+    ):
+        # Export turns on the goods leaving the EU, not on where the buyer is,
+        # so this is possible -- and unusual enough to say so.
+        found.append(_issue(
+            Severity.WARNING, "FA3-EXPORT-BUYER", "buyer.address.country",
+            "export (0 EX) with a buyer in Poland: zero-rating depends on the goods "
+            "leaving the EU, which this invoice cannot show; check it is not a "
+            "domestic supply",
+            "BT-55", "BT-151",
+        ))
 
     if invoice.currency == "PLN" and invoice.vat_accounting_currency is not None:
         found.append(_issue(
@@ -166,4 +216,4 @@ def fa3_issues(invoice: Invoice) -> list[ValidationIssue]:
 
     Errors come first, since they decide whether there is any output at all.
     """
-    return _errors(invoice) + _warnings(invoice)
+    return _errors(invoice) + _buyer_errors(invoice) + _warnings(invoice)

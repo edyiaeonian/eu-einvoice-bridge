@@ -178,3 +178,86 @@ class TestEverythingAtOnce:
         invoice = an_invoice(lines=[a_line("A1", rate="0.19")])
         severities = [i.severity for i in fa3_issues(invoice)]
         assert severities == sorted(severities, key=lambda s: s is Severity.WARNING)
+
+
+BUYER_RULES = {"FA3-WDT-BUYER", "FA3-OO-BUYER", "FA3-EXPORT-BUYER"}
+
+
+def buyer_rules(issues):
+    return rule_ids(issues) & BUYER_RULES
+
+
+class TestTheBuyerMustFitTheTaxCategory:
+    """Well-formed and semantically wrong: nothing downstream would notice.
+
+    The FA(3) schema accepts any rate code with any buyer, and KSeF's own
+    checks do not tie them together either, so these rules live here.
+    """
+
+    def test_an_intra_community_supply_needs_a_buyer_vat_id_from_another_member_state(self):
+        invoice = an_invoice(
+            lines=[zero(VatCategory.INTRA_COMMUNITY)],
+            buyer=a_party(name="Buyer sp. z o.o.", vat_id="PL1111111111"),
+        )
+        issue = next(i for i in fa3_issues(invoice) if i.rule_id == "FA3-WDT-BUYER")
+        assert issue.severity is Severity.ERROR
+        assert issue.location == "buyer.vat_id"
+
+    @pytest.mark.parametrize(
+        ("vat_id", "country"),
+        [(None, "DE"), ("NO123456789MVA", "NO"), ("US123456789", "US")],
+    )
+    def test_a_buyer_outside_the_eu_vat_system_cannot_receive_one(self, vat_id, country):
+        invoice = an_invoice(
+            lines=[zero(VatCategory.INTRA_COMMUNITY)],
+            buyer=a_party(vat_id=vat_id, country=country),
+        )
+        assert "FA3-WDT-BUYER" in rule_ids(errors(fa3_issues(invoice)))
+
+    @pytest.mark.parametrize(("vat_id", "country"), [("DE123456789", "DE"), ("EL123456789", "GR")])
+    def test_an_eu_buyer_is_accepted(self, vat_id, country):
+        invoice = an_invoice(
+            lines=[zero(VatCategory.INTRA_COMMUNITY)],
+            buyer=a_party(vat_id=vat_id, country=country),
+        )
+        assert not buyer_rules(fa3_issues(invoice))
+        assert errors(fa3_issues(invoice)) == []
+
+    def test_domestic_reverse_charge_to_a_foreign_buyer_is_refused(self):
+        # oo is P_13_10, domestic reverse charge. Cross-border it is np I or
+        # np II depending on whether it is a service under art. 100(1)(4),
+        # which the model does not record.
+        invoice = an_invoice(
+            lines=[zero(VatCategory.REVERSE_CHARGE)],
+            buyer=a_party(name="Käufer GmbH", vat_id="DE123456789", country="DE"),
+        )
+        issue = next(i for i in fa3_issues(invoice) if i.rule_id == "FA3-OO-BUYER")
+        assert issue.severity is Severity.ERROR
+        assert "np II" in issue.message
+
+    def test_domestic_reverse_charge_needs_a_buyer_nip(self):
+        invoice = an_invoice(
+            lines=[zero(VatCategory.REVERSE_CHARGE)],
+            buyer=a_party(name="Jan Kowalski", vat_id=None),
+        )
+        assert "FA3-OO-BUYER" in rule_ids(errors(fa3_issues(invoice)))
+
+    def test_domestic_reverse_charge_to_a_polish_business_is_accepted(self):
+        invoice = an_invoice(lines=[zero(VatCategory.REVERSE_CHARGE)])
+        assert not buyer_rules(fa3_issues(invoice))
+        assert errors(fa3_issues(invoice)) == []
+
+    def test_an_export_to_a_buyer_in_poland_is_flagged_but_not_blocked(self):
+        # Export turns on the goods leaving the EU, not on where the buyer is;
+        # a Polish buyer can have goods shipped abroad. Unusual enough to say so.
+        invoice = an_invoice(lines=[zero(VatCategory.EXPORT)])
+        issue = next(i for i in fa3_issues(invoice) if i.rule_id == "FA3-EXPORT-BUYER")
+        assert issue.severity is Severity.WARNING
+
+    def test_an_export_to_a_buyer_abroad_is_silent(self):
+        invoice = an_invoice(
+            lines=[zero(VatCategory.EXPORT)],
+            buyer=a_party(name="Buyer Inc.", vat_id=None, country="US"),
+        )
+        assert not buyer_rules(fa3_issues(invoice))
+        assert errors(fa3_issues(invoice)) == []

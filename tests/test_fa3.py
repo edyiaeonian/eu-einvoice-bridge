@@ -265,11 +265,11 @@ class TestRates:
     )
     def test_line_rate_code(self, category, rate, code):
         extras = PolishExtras(**DECLARATIONS, exemption_basis=ExemptionBasis.POLISH_ACT)
-        buyer = (
-            a_party(vat_id="DE123456789", country="DE")
-            if category is VatCategory.INTRA_COMMUNITY
-            else a_party(name="Buyer sp. z o.o.", vat_id="PL1111111111")
-        )
+        # Each code with the buyer it belongs with; see FA3-*-BUYER in checks.py.
+        buyer = {
+            VatCategory.INTRA_COMMUNITY: a_party(vat_id="DE123456789", country="DE"),
+            VatCategory.EXPORT: a_party(name="Buyer Inc.", vat_id=None, country="US"),
+        }.get(category, a_party(name="Buyer sp. z o.o.", vat_id="PL1111111111"))
         invoice = an_invoice(
             lines=[a_line(rate=rate, category=category)], extras=extras, buyer=buyer
         )
