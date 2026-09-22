@@ -29,7 +29,9 @@ CUSTOMIZATION_ID = "urn:cen.eu:en16931:2017"
 VAT_SCHEME_ID = "VAT"
 
 
-def _el(parent, ns: str, name: str, text: str | None = None, **attrs):
+def _el(
+    parent: etree._Element, ns: str, name: str, text: str | None = None, **attrs: str
+) -> etree._Element:
     node = etree.SubElement(parent, f"{{{ns}}}{name}", **attrs)
     if text is not None:
         node.text = text
@@ -46,7 +48,7 @@ def _percent(rate: Decimal) -> str:
 
 
 def _tax_category(
-    parent,
+    parent: etree._Element,
     element_name: str,
     category: VatCategory,
     rate: Decimal,
@@ -75,7 +77,7 @@ def _tax_category(
     _el(scheme, CBC, "ID", VAT_SCHEME_ID)
 
 
-def _party(parent, wrapper: str, party: Party) -> None:
+def _party(parent: etree._Element, wrapper: str, party: Party) -> None:
     node = _el(parent, CAC, wrapper)
     body = _el(node, CAC, "Party")
 
@@ -100,7 +102,7 @@ def _party(parent, wrapper: str, party: Party) -> None:
         _el(legal, CBC, "CompanyID", party.legal_registration_id)
 
 
-def _allowance_charge(parent, item: AllowanceCharge, currency: str) -> None:
+def _allowance_charge(parent: etree._Element, item: AllowanceCharge, currency: str) -> None:
     node = _el(parent, CAC, "AllowanceCharge")
     _el(node, CBC, "ChargeIndicator", "true" if item.is_charge else "false")
     if item.reason is not None:
@@ -109,14 +111,15 @@ def _allowance_charge(parent, item: AllowanceCharge, currency: str) -> None:
     _tax_category(node, "TaxCategory", item.vat_category, item.vat_rate)
 
 
-def _accounting_tax_total(parent, invoice: Invoice) -> None:
+def _accounting_tax_total(parent: etree._Element, invoice: Invoice) -> None:
     """BT-111: a second TaxTotal, in the VAT accounting currency, without subtotals.
 
     This is the shape the official examples use. The exchange rate itself is not
     written anywhere: EN16931 records only the converted total.
     """
     total = invoice.totals.total_vat_in_accounting_currency
-    if total is None:
+    accounting_currency = invoice.vat_accounting_currency  # set exactly when total is
+    if total is None or accounting_currency is None:
         return
     node = _el(parent, CAC, "TaxTotal")
     _el(
@@ -124,11 +127,11 @@ def _accounting_tax_total(parent, invoice: Invoice) -> None:
         CBC,
         "TaxAmount",
         _amount(total),
-        currencyID=invoice.vat_accounting_currency,
+        currencyID=accounting_currency,
     )
 
 
-def _tax_total(parent, invoice: Invoice) -> None:
+def _tax_total(parent: etree._Element, invoice: Invoice) -> None:
     node = _el(parent, CAC, "TaxTotal")
     _el(
         node,
@@ -163,7 +166,7 @@ def _tax_total(parent, invoice: Invoice) -> None:
         )
 
 
-def _monetary_total(parent, invoice: Invoice) -> None:
+def _monetary_total(parent: etree._Element, invoice: Invoice) -> None:
     totals = invoice.totals
     currency = invoice.currency
     node = _el(parent, CAC, "LegalMonetaryTotal")
@@ -183,7 +186,7 @@ def _monetary_total(parent, invoice: Invoice) -> None:
     amount("PayableAmount", totals.amount_due)  # BT-115
 
 
-def _invoice_line(parent, line: LineItem, currency: str) -> None:
+def _invoice_line(parent: etree._Element, line: LineItem, currency: str) -> None:
     node = _el(parent, CAC, "InvoiceLine")
     _el(node, CBC, "ID", line.line_id)
     _el(

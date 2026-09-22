@@ -34,7 +34,7 @@ class SessionKey:
     key: bytes
     iv: bytes
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if len(self.key) != KEY_BYTES or len(self.iv) != IV_BYTES:
             raise ValueError("a session key is 32 bytes of key and 16 bytes of IV")
 

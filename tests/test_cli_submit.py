@@ -11,7 +11,12 @@ import pytest
 
 from eu_einvoice_bridge import ksef
 from eu_einvoice_bridge.cli import main
-from eu_einvoice_bridge.ksef import Submission, SubmissionUncertain, create_test_identity, save_identity
+from eu_einvoice_bridge.ksef import (
+    Submission,
+    SubmissionUncertain,
+    create_test_identity,
+    save_identity,
+)
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "invoice-fa3.json"
 

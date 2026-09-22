@@ -4,7 +4,7 @@ Element order is fixed by the schema's sequences and follows the vendored XSD.
 The same never-rounding formatters as the UBL serializer render every number.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from lxml import etree
@@ -13,7 +13,7 @@ from ..formatting import amount, exchange_rate, price, quantity
 from ..model import ExemptionBasis, Invoice, LineItem, Party, PolishExtras, VatCategory
 from ..validate.issues import Severity, ValidationIssue
 from .checks import fa3_issues
-from .mapping import BUCKET_ORDER, FA3_NS, eu_vat_prefixes, rate_slot
+from .mapping import BUCKET_ORDER, FA3_NS, RateSlot, eu_vat_prefixes, rate_slot
 
 _BASIS_ELEMENT = {
     ExemptionBasis.POLISH_ACT: "P_19A",
@@ -34,7 +34,7 @@ class Fa3MappingError(ValueError):
         super().__init__("; ".join(f"{i.rule_id}: {i.message}" for i in self.issues))
 
 
-def _el(parent, name: str, text: str | None = None, **attrs):
+def _el(parent: etree._Element, name: str, text: str | None = None, **attrs: str) -> etree._Element:
     node = etree.SubElement(parent, f"{{{FA3_NS}}}{name}", **attrs)
     if text is not None:
         node.text = text
@@ -45,15 +45,15 @@ def _yes_no(flag: bool) -> str:
     return "1" if flag else "2"
 
 
-def _header(root, generated_at: datetime) -> None:
+def _header(root: etree._Element, generated_at: datetime) -> None:
     header = _el(root, "Naglowek")
     _el(header, "KodFormularza", "FA", kodSystemowy="FA (3)", wersjaSchemy="1-0E")
     _el(header, "WariantFormularza", "3")
-    stamp = generated_at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    stamp = generated_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     _el(header, "DataWytworzeniaFa", stamp)
 
 
-def _address(parent, party: Party) -> None:
+def _address(parent: etree._Element, party: Party) -> None:
     # FA(3) takes free-text address lines, not the structured parts EN16931 has.
     address = _el(parent, "Adres")
     _el(address, "KodKraju", party.address.country)
@@ -61,15 +61,23 @@ def _address(parent, party: Party) -> None:
     _el(address, "AdresL2", f"{party.address.postal_code} {party.address.city}")
 
 
-def _seller(root, party: Party) -> None:
+def _slot(category: VatCategory, rate: Decimal) -> RateSlot:
+    slot = rate_slot(category, rate)
+    # fa3_issues() refused every unmappable rate before serializing began.
+    assert slot is not None, (category, rate)
+    return slot
+
+
+def _seller(root: etree._Element, party: Party) -> None:
     seller = _el(root, "Podmiot1")
     ids = _el(seller, "DaneIdentyfikacyjne")
+    assert party.vat_id is not None  # FA3-SELLER-NIP
     _el(ids, "NIP", party.vat_id[2:])
     _el(ids, "Nazwa", party.name)
     _address(seller, party)
 
 
-def _buyer(root, party: Party, extras: PolishExtras) -> None:
+def _buyer(root: etree._Element, party: Party, extras: PolishExtras) -> None:
     buyer = _el(root, "Podmiot2")
     ids = _el(buyer, "DaneIdentyfikacyjne")
     vat_id = party.vat_id
@@ -102,7 +110,7 @@ def _buckets(
     tax: dict[str, Decimal] = {}
     tax_pln: dict[str, Decimal] = {}
     for entry in invoice.vat_breakdown:
-        slot = rate_slot(entry.category, entry.rate)
+        slot = _slot(entry.category, entry.rate)
         net[slot.bucket] = net.get(slot.bucket, Decimal("0")) + entry.taxable_amount
         if slot.taxed:
             tax[slot.bucket] = tax.get(slot.bucket, Decimal("0")) + entry.tax_amount
@@ -112,7 +120,7 @@ def _buckets(
     return net, tax, tax_pln
 
 
-def _annotations(fa, invoice: Invoice, extras: PolishExtras) -> None:
+def _annotations(fa: etree._Element, invoice: Invoice, extras: PolishExtras) -> None:
     notes = _el(fa, "Adnotacje")
     _el(notes, "P_16", _yes_no(extras.cash_accounting))
     _el(notes, "P_17", _yes_no(extras.self_billing))
@@ -130,6 +138,7 @@ def _annotations(fa, invoice: Invoice, extras: PolishExtras) -> None:
         _el(exemption, "P_19N", "1")
     else:
         _el(exemption, "P_19", "1")
+        assert extras.exemption_basis is not None  # FA3-EXEMPTION-BASIS
         _el(exemption, _BASIS_ELEMENT[extras.exemption_basis], exempt.exemption_reason)
 
     transport = _el(notes, "NoweSrodkiTransportu")
@@ -141,7 +150,7 @@ def _annotations(fa, invoice: Invoice, extras: PolishExtras) -> None:
     _el(margin, "P_PMarzyN", "1")
 
 
-def _line(fa, position: int, line: LineItem, rate: Decimal | None) -> None:
+def _line(fa: etree._Element, position: int, line: LineItem, rate: Decimal | None) -> None:
     row = _el(fa, "FaWiersz")
     # NrWierszaFa must be a positive integer; BT-126 may be any text.
     _el(row, "NrWierszaFa", str(position))
@@ -150,12 +159,12 @@ def _line(fa, position: int, line: LineItem, rate: Decimal | None) -> None:
     _el(row, "P_8B", quantity(line.quantity))
     _el(row, "P_9A", price(line.unit_price))
     _el(row, "P_11", amount(line.net_amount))
-    _el(row, "P_12", rate_slot(line.vat_category, line.vat_rate).code)
+    _el(row, "P_12", _slot(line.vat_category, line.vat_rate).code)
     if rate is not None:
         _el(row, "KursWaluty", exchange_rate(rate))
 
 
-def _fa(root, invoice: Invoice, extras: PolishExtras) -> None:
+def _fa(root: etree._Element, invoice: Invoice, extras: PolishExtras) -> None:
     fa = _el(root, "Fa")
     _el(fa, "KodWaluty", invoice.currency)
     _el(fa, "P_1", invoice.issue_date.isoformat())
@@ -221,9 +230,11 @@ def to_fa3(invoice: Invoice, *, generated_at: datetime) -> bytes:
     if blocking:
         raise Fa3MappingError(blocking)
 
+    extras = invoice.extras
+    assert extras is not None  # FA3-NO-DECLARATIONS
     root = etree.Element(f"{{{FA3_NS}}}Faktura", nsmap={None: FA3_NS})
     _header(root, generated_at)
     _seller(root, invoice.seller)
-    _buyer(root, invoice.buyer, invoice.extras)
-    _fa(root, invoice, invoice.extras)
+    _buyer(root, invoice.buyer, extras)
+    _fa(root, invoice, extras)
     return etree.tostring(root, pretty_print=True, xml_declaration=True, encoding="UTF-8")

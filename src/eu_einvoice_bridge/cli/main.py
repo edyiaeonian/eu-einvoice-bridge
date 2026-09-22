@@ -14,7 +14,7 @@ accounted for.
 
 import argparse
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -64,7 +64,7 @@ def _fa3_chain(invoice: Invoice) -> tuple[bytes | None, list[ValidationIssue]]:
         return None, issues
     # The serializer never reads the clock, so its output is reproducible; this
     # is the edge of the program, where the real time belongs.
-    xml = to_fa3(invoice, generated_at=datetime.now(timezone.utc))
+    xml = to_fa3(invoice, generated_at=datetime.now(UTC))
     return xml, sorted(issues + validate_fa3(xml), key=lambda i: i.sort_key)
 
 
@@ -86,7 +86,7 @@ def _check(
     return invoice, xml, validate_ubl(xml)
 
 
-def _validate_command(args) -> int:
+def _validate_command(args: argparse.Namespace) -> int:
     path = Path(args.input)
     invoice, _, issues = _check(path, args.format)
 
@@ -95,11 +95,12 @@ def _validate_command(args) -> int:
         return EXIT_INVALID
 
     # Whatever remains is warnings: shown, but they do not make it invalid.
+    assert invoice is not None  # only a model error leaves no invoice
     print(format_success(path.name, invoice, issues, args.format), end="")
     return EXIT_OK
 
 
-def _convert_command(args) -> int:
+def _convert_command(args: argparse.Namespace) -> int:
     path = Path(args.input)
     _, xml, issues = _check(path, args.format)
 
@@ -115,6 +116,7 @@ def _convert_command(args) -> int:
         # stderr, so warnings never end up inside XML written to stdout.
         print(format_issues(path.name, issues), end="", file=sys.stderr)
 
+    assert xml is not None  # only a blocking error leaves no XML
     if args.output:
         Path(args.output).write_bytes(xml)
         print(f"{path.name}: wrote {args.output}")
@@ -134,7 +136,7 @@ def _seller_for(invoice: Invoice, nip: str, substitute: bool) -> Invoice | None:
     return invoice.model_copy(update={"seller": seller})
 
 
-def _submit_command(args) -> int:
+def _submit_command(args: argparse.Namespace) -> int:
     # Imported here so validate and convert never load the network stack.
     import hashlib
 
@@ -178,17 +180,19 @@ def _submit_command(args) -> int:
         print(format_issues(path.name, issues), end="", flush=True)
         print("not submitted", file=sys.stderr)
         return EXIT_INVALID
+    assert xml is not None  # only a blocking error leaves no XML
+    document = xml
     if issues:
         print(format_issues(path.name, issues), end="", file=sys.stderr)
 
-    store = ksef.StateStore(Path(args.state_dir), clock=lambda: datetime.now(timezone.utc))
+    store = ksef.StateStore(Path(args.state_dir), clock=lambda: datetime.now(UTC))
     polling = ksef.Polling(timeout_seconds=args.timeout)
     try:
         with httpx.Client(base_url=ksef.TEST_BASE_URL, timeout=30.0) as http:
             record = ksef.submit(
                 invoice.number,
                 source_hash,
-                lambda: xml,
+                lambda: document,
                 client=ksef.KsefClient(http),
                 identity=identity,
                 store=store,
@@ -239,7 +243,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subcommands = parser.add_subparsers(dest="command", required=True)
 
-    def add_format(sub):
+    def add_format(sub: argparse.ArgumentParser) -> None:
         sub.add_argument(
             "--format",
             choices=FORMATS,
@@ -281,7 +285,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="replace the seller's NIP with the test identity's",
     )
     send.add_argument(
-        "--timeout", type=float, default=120.0, help="seconds to wait for KSeF's verdict (default: 120)"
+        "--timeout",
+        type=float,
+        default=120.0,
+        help="seconds to wait for KSeF's verdict (default: 120)",
     )
     send.set_defaults(handler=_submit_command)
 

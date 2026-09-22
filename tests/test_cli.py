@@ -8,7 +8,6 @@ place to look.
 import importlib
 import json
 from pathlib import Path
-from decimal import Decimal
 
 import pytest
 

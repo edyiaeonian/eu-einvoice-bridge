@@ -28,7 +28,7 @@ class _VendoredCrdResolver(etree.Resolver):
     loading fail rather than quietly reach out to the internet.
     """
 
-    def resolve(self, url, public_id, context):
+    def resolve(self, url: str, public_id: str | None, context: object) -> object:
         if url.startswith(CRD_BASE_PREFIX):
             local = FA3_BASE_DIR / url[len(CRD_BASE_PREFIX) :]
             return self.resolve_filename(str(local), context)

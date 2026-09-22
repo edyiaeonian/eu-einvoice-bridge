@@ -186,9 +186,17 @@ def _send(
     return store.save(replace(record, status="sent", invoice_reference=reference))
 
 
-def _recover(client: KsefClient, store: StateStore, access_token: str, record: Submission) -> Submission:
+def _session(record: Submission) -> str:
+    if record.session_reference is None:
+        raise SubmissionError(f"the record for {record.invoice_number} names no session")
+    return record.session_reference
+
+
+def _recover(
+    client: KsefClient, store: StateStore, access_token: str, record: Submission
+) -> Submission:
     """A send went unanswered last time; look for it instead of resending."""
-    for invoice in client.session_invoices(record.session_reference, access_token):
+    for invoice in client.session_invoices(_session(record), access_token):
         if invoice.get("invoiceHash") == record.invoice_hash:
             return store.save(
                 replace(record, status="sent", invoice_reference=invoice["referenceNumber"])
@@ -209,25 +217,29 @@ def _await_result(
     sleep: Callable[[float], None],
     polling: Polling,
 ) -> Submission:
+    session, invoice = _session(record), record.invoice_reference
+    if invoice is None:
+        raise SubmissionError(f"the record for {record.invoice_number} names no invoice")
     waited = 0.0
     while True:
-        result = client.invoice_status(record.session_reference, record.invoice_reference, access_token)
+        result = client.invoice_status(session, invoice, access_token)
         code = result["status"]["code"]
         if code == _SUCCESS:
             # Saved before the download: if that fails, the number is not lost
             # and a rerun only has to fetch the UPO.
             record = store.save(replace(record, ksef_number=result.get("ksefNumber")))
-            upo = client.download_upo(record.session_reference, record.invoice_reference, access_token)
+            upo = client.download_upo(session, invoice, access_token)
             upo_path = store.upo_path(record.invoice_number)
             upo_path.write_bytes(upo)
-            return store.save(replace(record, status="accepted", upo_path=str(upo_path), error=None))
+            return store.save(
+                replace(record, status="accepted", upo_path=str(upo_path), error=None)
+            )
         if code >= 300:
             details = "; ".join(result["status"].get("details") or [])
-            return store.save(replace(
-                record,
-                status="rejected",
-                error=f"{code} {result['status'].get('description')}" + (f": {details}" if details else ""),
-            ))
+            reason = f"{code} {result['status'].get('description')}"
+            if details:
+                reason += f": {details}"
+            return store.save(replace(record, status="rejected", error=reason))
         if waited >= polling.timeout_seconds:
             # Left as "sent": a rerun resumes polling rather than resending.
             return record
@@ -301,11 +313,11 @@ def submit(
         record = _await_result(client, store, access_token, record, sleep=sleep, polling=polling)
     except TransientError as exc:
         # The invoice is in KSeF; only following it up failed.
-        return store.save(replace(store.load(invoice_number), error=str(exc)))
+        return store.save(replace(store.load(invoice_number) or record, error=str(exc)))
 
     if opened_now and record.status in ("accepted", "rejected"):
         try:
-            client.close_session(record.session_reference, access_token)
+            client.close_session(_session(record), access_token)
         except KsefError:
             pass  # the session expires by itself; the invoice's result is what matters
     return record

@@ -5,10 +5,12 @@ built on one rule: never make someone run the command twice to learn about a
 second problem.
 """
 
+from collections.abc import Sequence
 from itertools import groupby
 
 from pydantic import ValidationError
 
+from ..model import Invoice
 from ..validate import Severity, ValidationIssue
 
 LAYER_NAMES = {
@@ -104,8 +106,8 @@ FORMAT_LABELS = {"ubl": "EN16931 (UBL 2.1)", "fa3": "FA(3)"}
 
 def format_success(
     source_name: str,
-    invoice,
-    warnings: list[ValidationIssue] = (),
+    invoice: Invoice,
+    warnings: Sequence[ValidationIssue] = (),
     fmt: str = "ubl",
 ) -> str:
     categories = {entry.category.value for entry in invoice.vat_breakdown}

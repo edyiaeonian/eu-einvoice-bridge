@@ -36,7 +36,8 @@ def price(value: Decimal) -> str:
     to two for readability; padding adds zeros and never rounds.
     """
     normalized = value.normalize()
-    if normalized.as_tuple().exponent > -2:
+    exponent = normalized.as_tuple().exponent  # a letter only for NaN or infinity
+    if isinstance(exponent, int) and exponent > -2:
         normalized = normalized.quantize(CENTS)
     return f"{normalized:f}"
 

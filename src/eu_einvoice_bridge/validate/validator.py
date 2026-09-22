@@ -7,6 +7,7 @@ complaints, so each layer only runs if the previous one was clean.
 
 import re
 from functools import lru_cache
+from typing import Any
 
 from lxml import etree
 from saxonche import PySaxonProcessor
@@ -61,7 +62,7 @@ def _xsd() -> etree.XMLSchema:
 
 
 @lru_cache(maxsize=1)
-def _saxon() -> tuple[PySaxonProcessor, object]:
+def _saxon() -> tuple[PySaxonProcessor, Any]:
     """One processor and one compiled stylesheet for the life of the process.
 
     The official XSLT is close to 900 KB; compiling it on every call dominated

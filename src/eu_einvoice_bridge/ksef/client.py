@@ -12,6 +12,7 @@ https://api-test.ksef.mf.gov.pl/v2 -- not /api/v2, as secondary sources say.
 
 import time
 from collections.abc import Callable
+from typing import Any
 
 import httpx
 
@@ -52,7 +53,7 @@ class KsefClient:
         self._backoff = backoff_seconds
         self._sleep = sleep
 
-    def _send(self, method: str, path: str, **kwargs) -> httpx.Response:
+    def _send(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         try:
             response = self._http.request(method, path, **kwargs)
         except httpx.TransportError as exc:
@@ -71,7 +72,7 @@ class KsefClient:
             )
         return response
 
-    def _idempotent(self, method: str, path: str, **kwargs) -> httpx.Response:
+    def _idempotent(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         """Retried with exponential backoff; only for requests safe to repeat."""
         for attempt in range(self._retries + 1):
             try:
@@ -102,7 +103,7 @@ class KsefClient:
         ).json()
         return body["referenceNumber"], body["authenticationToken"]["token"]
 
-    def auth_status(self, reference: str, auth_token: str) -> dict:
+    def auth_status(self, reference: str, auth_token: str) -> dict[str, Any]:
         response = self._idempotent("GET", f"/auth/{reference}", headers=self._bearer(auth_token))
         return response.json()["status"]
 
@@ -113,7 +114,7 @@ class KsefClient:
 
     # -- encryption keys ------------------------------------------------------
 
-    def symmetric_key_certificate(self) -> dict:
+    def symmetric_key_certificate(self) -> dict[str, Any]:
         certificates = self._idempotent("GET", "/security/public-key-certificates").json()
         for certificate in certificates:
             if "SymmetricKeyEncryption" in certificate.get("usage", []):
@@ -136,7 +137,7 @@ class KsefClient:
         ).json()
         return body["referenceNumber"]
 
-    def send_invoice(self, session: str, access_token: str, payload: dict) -> str:
+    def send_invoice(self, session: str, access_token: str, payload: dict[str, Any]) -> str:
         """Never retried: an unanswered send may still have arrived."""
         body = self._send(
             "POST",
@@ -146,18 +147,18 @@ class KsefClient:
         ).json()
         return body["referenceNumber"]
 
-    def invoice_status(self, session: str, invoice: str, access_token: str) -> dict:
+    def invoice_status(self, session: str, invoice: str, access_token: str) -> dict[str, Any]:
         return self._idempotent(
             "GET", f"/sessions/{session}/invoices/{invoice}", headers=self._bearer(access_token)
         ).json()
 
-    def session_invoices(self, session: str, access_token: str) -> list[dict]:
+    def session_invoices(self, session: str, access_token: str) -> list[dict[str, Any]]:
         """Every invoice in the session, following continuation tokens.
 
         Used to recover after an unanswered send, so stopping at the first page
         could miss the very invoice being looked for.
         """
-        invoices: list[dict] = []
+        invoices: list[dict[str, Any]] = []
         continuation: str | None = None
         while True:
             headers = self._bearer(access_token)

@@ -44,9 +44,9 @@ def test_an_invoice_is_accepted_and_its_upo_retrieved(tmp_path):
     data["seller"]["vat_id"] = f"PL{identity.nip}"
     data["buyer"]["vat_id"] = f"PL{random_test_nip()}"
     invoice = Invoice.model_validate(data)
-    xml = to_fa3(invoice, generated_at=dt.datetime.now(dt.timezone.utc))
+    xml = to_fa3(invoice, generated_at=dt.datetime.now(dt.UTC))
 
-    store = StateStore(tmp_path, clock=lambda: dt.datetime.now(dt.timezone.utc))
+    store = StateStore(tmp_path, clock=lambda: dt.datetime.now(dt.UTC))
     with httpx.Client(base_url=TEST_BASE_URL, timeout=30.0) as http:
         client = KsefClient(http)
         record = submit(

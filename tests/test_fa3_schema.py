@@ -5,14 +5,14 @@ fixture here is hand-built. That makes the negative cases essential: a schema
 that accepted everything would make a hand-built fixture pass just as easily.
 """
 
+from pathlib import Path
+
 import pytest
 from lxml import etree
 
 from eu_einvoice_bridge.paths import FA3_XSD
 from eu_einvoice_bridge.validate import Severity, validate_fa3
 from eu_einvoice_bridge.validate.fa3 import CRD_BASE_PREFIX, fa3_schema
-
-from pathlib import Path
 
 FIXTURE = Path(__file__).parent / "fixtures" / "fa3_minimal.xml"
 NS = "http://crd.gov.pl/wzor/2025/06/25/13775/"

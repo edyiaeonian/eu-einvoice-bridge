@@ -6,7 +6,7 @@ and every kind of buyer identification has at least one invoice run through
 the schema.
 """
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -28,7 +28,7 @@ from eu_einvoice_bridge.model import (
 from eu_einvoice_bridge.validate import validate_fa3
 
 NS = {"f": "http://crd.gov.pl/wzor/2025/06/25/13775/"}
-GENERATED_AT = datetime(2026, 9, 21, 10, 0, tzinfo=timezone.utc)
+GENERATED_AT = datetime(2026, 9, 21, 10, 0, tzinfo=UTC)
 
 DECLARATIONS = {
     "buyer_local_government_unit": False,

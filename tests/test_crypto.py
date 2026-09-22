@@ -102,7 +102,7 @@ class TestRsaOaep:
         from cryptography.x509.oid import NameOID
 
         name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "test")])
-        now = dt.datetime.now(dt.timezone.utc)
+        now = dt.datetime.now(dt.UTC)
         certificate = (
             x509.CertificateBuilder()
             .subject_name(name)

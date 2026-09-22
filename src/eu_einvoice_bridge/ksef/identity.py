@@ -36,7 +36,7 @@ def nip_checksum_ok(nip: str) -> bool:
     if len(nip) != 10 or not nip.isdigit():
         return False
     digits = [int(c) for c in nip]
-    remainder = sum(d * w for d, w in zip(digits, _NIP_WEIGHTS)) % 11
+    remainder = sum(d * w for d, w in zip(digits, _NIP_WEIGHTS, strict=False)) % 11
     return remainder != 10 and remainder == digits[9]
 
 
@@ -46,7 +46,7 @@ def random_test_nip() -> str:
         digits = [secrets.randbelow(9) + 1] + [secrets.randbelow(10) for _ in range(8)]
         if digits[1] == 0 and digits[2] == 0:
             continue  # FA(3) forbids a NIP whose second and third digits are both 0
-        remainder = sum(d * w for d, w in zip(digits, _NIP_WEIGHTS)) % 11
+        remainder = sum(d * w for d, w in zip(digits, _NIP_WEIGHTS, strict=False)) % 11
         if remainder != 10:
             return "".join(map(str, digits + [remainder]))
 
@@ -76,7 +76,7 @@ def create_test_identity(nip: str | None = None) -> TestIdentity:
         x509.NameAttribute(NameOID.ORGANIZATION_IDENTIFIER, f"VATPL-{nip}"),
         x509.NameAttribute(NameOID.COUNTRY_NAME, "PL"),
     ])
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
     certificate = (
         x509.CertificateBuilder()
         .subject_name(subject)
@@ -117,10 +117,11 @@ def load_identity(directory: Path) -> TestIdentity | None:
     certificate_pem = cert_path.read_bytes()
     certificate = x509.load_pem_x509_certificate(certificate_pem)
     identifier = certificate.subject.get_attributes_for_oid(NameOID.ORGANIZATION_IDENTIFIER)
-    if not identifier or not identifier[0].value.startswith("VATPL-"):
+    value = identifier[0].value if identifier else None
+    if not isinstance(value, str) or not value.startswith("VATPL-"):
         raise ValueError(f"{cert_path} has no VATPL- organizationIdentifier")
     return TestIdentity(
-        nip=identifier[0].value.removeprefix("VATPL-"),
+        nip=value.removeprefix("VATPL-"),
         private_key_pem=key_path.read_bytes(),
         certificate_pem=certificate_pem,
     )
@@ -143,6 +144,6 @@ def sign_auth_request(challenge: str, identity: TestIdentity) -> bytes:
     signed = signer.sign(
         auth_token_request(challenge, identity.nip),
         key=identity.private_key_pem,
-        cert=identity.certificate_pem,
+        cert=identity.certificate_pem.decode("ascii"),
     )
     return etree.tostring(signed, xml_declaration=True, encoding="UTF-8")

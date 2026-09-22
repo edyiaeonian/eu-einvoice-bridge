@@ -1,7 +1,8 @@
+from collections.abc import Mapping
 from datetime import date
 from decimal import Decimal
 from functools import cached_property
-from typing import Annotated, Self
+from typing import Annotated, Any, Self
 
 from pydantic import (
     BaseModel,
@@ -120,7 +121,7 @@ class Invoice(BaseModel):
             )
         return self
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]  # as Pydantic's docs advise
     @cached_property
     def vat_breakdown(self) -> tuple[VatBreakdownEntry, ...]:
         """BG-23, grouped per BR-S-08 and taxed per BR-CO-17.
@@ -174,7 +175,7 @@ class Invoice(BaseModel):
             )
         return tuple(entries)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]  # as Pydantic's docs advise
     @cached_property
     def totals(self) -> Totals:
         """BG-22, following BR-CO-10 through BR-CO-16.
@@ -214,7 +215,10 @@ class Invoice(BaseModel):
             # rate, so this keeps both documents stating the same figure.
             total_vat_in_accounting_currency=(
                 sum(
-                    (e.tax_amount_in_accounting_currency for e in self.vat_breakdown),
+                    (
+                        e.tax_amount_in_accounting_currency or Decimal("0.00")
+                        for e in self.vat_breakdown
+                    ),
                     Decimal("0.00"),
                 )
                 if self.exchange_rate is not None
@@ -222,12 +226,12 @@ class Invoice(BaseModel):
             ),
         )
 
-    def model_post_init(self, __context) -> None:
+    def model_post_init(self, __context: Any) -> None:
         # Force derivation so inconsistent input fails at construction rather
         # than at first access, somewhere far from the cause.
         _ = self.totals
 
-    def model_copy(self, *, update=None, deep: bool = False) -> Self:
+    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
         """Copy, rebuilding through validation whenever anything changes.
 
         frozen=True stops assignment, but Pydantic's model_copy goes around it:

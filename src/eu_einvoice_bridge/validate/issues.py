@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -17,7 +18,7 @@ SOURCE_ORDER = {"mapping": 0, "xml": 1, "xsd": 2, "schematron": 3}
 SEVERITY_ORDER = {Severity.ERROR: 0, Severity.WARNING: 1}
 
 
-def has_errors(issues) -> bool:
+def has_errors(issues: Iterable["ValidationIssue"]) -> bool:
     """Whether anything found makes the invoice unacceptable.
 
     Warnings are reported but never decide the outcome; that is what separates

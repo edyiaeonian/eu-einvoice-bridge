@@ -19,7 +19,9 @@ from .mapping import eu_vat_prefixes, rate_slot
 _REASON_CARRIED = frozenset({VatCategory.EXEMPT})
 
 
-def _issue(severity, rule_id, location, message, *terms) -> ValidationIssue:
+def _issue(
+    severity: Severity, rule_id: str, location: str, message: str, *terms: str
+) -> ValidationIssue:
     return ValidationIssue(
         source="mapping",
         severity=severity,

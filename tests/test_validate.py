@@ -5,15 +5,14 @@ carefully as the pass/fail outcome: a validator that knows something is wrong
 but cannot say where is barely more useful than one that says nothing.
 """
 
-from decimal import Decimal
 
 import pytest
 from lxml import etree
 
+from eu_einvoice_bridge.ubl import to_ubl
 from eu_einvoice_bridge.validate import Severity, ValidationIssue, validate_ubl
 
 from .test_ubl import a_golden_invoice, an_invoice
-from eu_einvoice_bridge.ubl import to_ubl
 
 
 @pytest.fixture(scope="module")
