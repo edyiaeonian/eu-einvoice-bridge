@@ -7,7 +7,7 @@ resource or fails. Those raise on a transient failure and leave the decision to
 the caller -- which, for a send, is to query rather than resend.
 
 Endpoint paths are those of the published OpenAPI document, whose server is
-https://api-test.ksef.mf.gov.pl/v2 -- not /api/v2, as secondary sources say.
+https://api-test.ksef.mf.gov.pl/v2.
 """
 
 import time

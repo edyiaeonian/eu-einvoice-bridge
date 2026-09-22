@@ -549,7 +549,7 @@ CLI 據此一次列出所有錯誤。**這是本專案唯一的產品介面,品�
 | 送件內容 | 明文與密文各自的 SHA-256(base64)與大小,加上 base64 密文 |
 | Session 效期 | 12 小時 |
 
-> ✅ **已對照官方 OpenAPI 並實測確認(2026-09-21)。**與設計階段理解不同之處:base URL 是 `https://api-test.ksef.mf.gov.pl/v2`,**不是**部分二手資料寫的 `/api/v2`。
+> ✅ **已對照官方 OpenAPI 並實測確認(2026-09-21)。**Base URL 採用 OpenAPI `servers` 所列的 `https://api-test.ksef.mf.gov.pl/v2`。(更正 2026-09-22:先前寫「不是 `/api/v2`」有誤,實測 `/api/v2` 同樣可用,本專案只是依 OpenAPI 採用 `/v2`。)
 
 ### 實測確認的協定事實
 
