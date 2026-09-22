@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
+from lxml import etree
+
 
 class Severity(StrEnum):
     ERROR = "error"
@@ -57,3 +59,19 @@ class ValidationIssue:
         elif self.location:
             where = f" ({self.location})"
         return f"{self.severity.value}: {label}{terms}{where} — {self.message}"
+
+
+def parse_xml(xml: bytes) -> tuple[etree._ElementTree | None, ValidationIssue | None]:
+    """Parse, or say why not: a syntax error is reported like any other issue.
+
+    Shared by both validators, which each start from bytes.
+    """
+    try:
+        return etree.ElementTree(etree.fromstring(xml)), None
+    except etree.XMLSyntaxError as exc:
+        return None, ValidationIssue(
+            source="xml",
+            severity=Severity.ERROR,
+            message=str(exc),
+            line=getattr(exc, "lineno", None),
+        )

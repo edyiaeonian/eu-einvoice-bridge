@@ -12,7 +12,7 @@ from lxml import etree
 from saxonche import PySaxonProcessor
 
 from ..paths import EN16931_XSLT, UBL_INVOICE_XSD
-from .issues import Severity, ValidationIssue
+from .issues import Severity, ValidationIssue, parse_xml
 
 SVRL_NS = {"svrl": "http://purl.oclc.org/dsdl/svrl"}
 
@@ -83,18 +83,6 @@ def _schematron_svrl(xml: bytes) -> str:
     return executable.transform_to_string(xdm_node=document)
 
 
-def _parse(xml: bytes) -> tuple[etree._ElementTree | None, ValidationIssue | None]:
-    try:
-        return etree.ElementTree(etree.fromstring(xml)), None
-    except etree.XMLSyntaxError as exc:
-        return None, ValidationIssue(
-            source="xml",
-            severity=Severity.ERROR,
-            message=str(exc),
-            line=getattr(exc, "lineno", None),
-        )
-
-
 def _xsd_issues(tree: etree._ElementTree) -> list[ValidationIssue]:
     schema = _xsd()
     if schema.validate(tree):
@@ -150,7 +138,7 @@ def validate_ubl(xml: bytes) -> list[ValidationIssue]:
     round trips, so each layer reports everything it sees before the chain
     stops.
     """
-    tree, syntax_error = _parse(xml)
+    tree, syntax_error = parse_xml(xml)
     if syntax_error is not None:
         return [syntax_error]
 

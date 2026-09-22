@@ -4,12 +4,15 @@ The signature is verified here with signxml's own verifier against the
 certificate -- the same check KSeF TEST performs, minus its trust store.
 """
 
+import os
 import stat
+from pathlib import Path
 
 import pytest
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from lxml import etree
+from signxml.exceptions import InvalidDigest
 from signxml.xades import XAdESVerifier
 
 from eu_einvoice_bridge.ksef.identity import (
@@ -74,6 +77,30 @@ class TestStorage:
         mode = stat.S_IMODE((tmp_path / "test-identity.key.pem").stat().st_mode)
         assert mode == 0o600
 
+    def test_the_key_file_is_created_owner_only_not_chmodded_afterwards(
+        self, identity, tmp_path, monkeypatch
+    ):
+        # A final-mode check cannot see a write-then-chmod window, so look at
+        # the mode the file is created with.
+        created = []
+        real_open = os.open
+
+        def spy(path, flags, mode=0o777, *args, **kwargs):
+            created.append((Path(path).name, flags & os.O_CREAT, mode))
+            return real_open(path, flags, mode, *args, **kwargs)
+
+        monkeypatch.setattr(os, "open", spy)
+        save_identity(identity, tmp_path)
+        assert ("test-identity.key.pem", os.O_CREAT, 0o600) in created
+
+    def test_an_existing_key_file_is_tightened(self, identity, tmp_path):
+        key = tmp_path / "test-identity.key.pem"
+        key.write_bytes(b"old")
+        key.chmod(0o644)
+        save_identity(identity, tmp_path)
+        assert stat.S_IMODE(key.stat().st_mode) == 0o600
+        assert key.read_bytes() == identity.private_key_pem
+
     def test_a_missing_identity_loads_as_none(self, tmp_path):
         assert load_identity(tmp_path) is None
 
@@ -104,5 +131,6 @@ class TestSignature:
 
     def test_a_tampered_challenge_fails_verification(self, identity):
         signed = sign_auth_request("original", identity).replace(b"original", b"tampered")
-        with pytest.raises(Exception):
+        # The digest of reference 0 -- the request itself -- no longer matches.
+        with pytest.raises(InvalidDigest, match="reference 0"):
             XAdESVerifier().verify(signed, x509_cert=identity.certificate_pem, expect_references=3)

@@ -9,8 +9,7 @@ from functools import lru_cache
 from lxml import etree
 
 from ..paths import FA3_BASE_DIR, FA3_XSD
-from .issues import Severity, ValidationIssue
-from .validator import _parse
+from .issues import Severity, ValidationIssue, parse_xml
 
 # The FA(3) schema imports its base types by absolute URL. The Ministry's own
 # repository ships those base schemas alongside it, and they are canonically
@@ -45,7 +44,7 @@ def fa3_schema() -> etree.XMLSchema:
 
 def validate_fa3(xml: bytes) -> list[ValidationIssue]:
     """Every schema violation in an FA(3) document, not only the first."""
-    tree, syntax_error = _parse(xml)
+    tree, syntax_error = parse_xml(xml)
     if syntax_error is not None:
         return [syntax_error]
 

@@ -11,6 +11,7 @@ NIPs rather than well-known ones. random_test_nip() makes them.
 """
 
 import datetime as dt
+import os
 import secrets
 from dataclasses import dataclass
 from pathlib import Path
@@ -99,9 +100,13 @@ def create_test_identity(nip: str | None = None) -> TestIdentity:
 
 def save_identity(identity: TestIdentity, directory: Path) -> None:
     directory.mkdir(parents=True, exist_ok=True)
-    key_path = directory / _KEY_FILE
-    key_path.write_bytes(identity.private_key_pem)
-    key_path.chmod(0o600)
+    # Created owner-only, so the key is never readable by others -- not even
+    # between writing it and a chmod afterwards. fchmod covers a file that
+    # already existed, whose mode O_CREAT would leave alone.
+    fd = os.open(directory / _KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as key_file:
+        os.fchmod(key_file.fileno(), 0o600)
+        key_file.write(identity.private_key_pem)
     (directory / _CERT_FILE).write_bytes(identity.certificate_pem)
 
 
