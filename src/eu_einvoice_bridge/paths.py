@@ -1,8 +1,8 @@
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-
-ASSETS_DIR = _REPO_ROOT / "assets"
+# Inside the package, so a wheel carries them: a path relative to the repo root
+# only resolves in an editable install, where the package is the checkout.
+ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 EN16931_DIR = ASSETS_DIR / "en16931"
 EN16931_XSLT = EN16931_DIR / "xslt" / "EN16931-UBL-validation.xslt"
 EN16931_EXAMPLES = EN16931_DIR / "examples"

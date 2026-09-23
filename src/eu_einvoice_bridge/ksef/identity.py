@@ -32,6 +32,10 @@ _KEY_FILE = "test-identity.key.pem"
 _CERT_FILE = "test-identity.cert.pem"
 
 
+class IdentityError(ValueError):
+    """The stored test identity cannot be used."""
+
+
 def nip_checksum_ok(nip: str) -> bool:
     if len(nip) != 10 or not nip.isdigit():
         return False
@@ -110,7 +114,12 @@ def save_identity(identity: TestIdentity, directory: Path) -> None:
     (directory / _CERT_FILE).write_bytes(identity.certificate_pem)
 
 
-def load_identity(directory: Path) -> TestIdentity | None:
+def load_identity(directory: Path, now: dt.datetime | None = None) -> TestIdentity | None:
+    """The identity stored in directory, None if there is none.
+
+    An expired certificate is refused here, by name: KSeF would only answer
+    with a bare 4xx during authentication, which says nothing about why.
+    """
     key_path, cert_path = directory / _KEY_FILE, directory / _CERT_FILE
     if not (key_path.exists() and cert_path.exists()):
         return None
@@ -119,7 +128,15 @@ def load_identity(directory: Path) -> TestIdentity | None:
     identifier = certificate.subject.get_attributes_for_oid(NameOID.ORGANIZATION_IDENTIFIER)
     value = identifier[0].value if identifier else None
     if not isinstance(value, str) or not value.startswith("VATPL-"):
-        raise ValueError(f"{cert_path} has no VATPL- organizationIdentifier")
+        raise IdentityError(f"{cert_path} has no VATPL- organizationIdentifier")
+    expires = certificate.not_valid_after_utc
+    if expires <= (now or dt.datetime.now(dt.UTC)):
+        raise IdentityError(
+            f"the test identity in {directory}/ expired on {expires:%Y-%m-%d}; move it "
+            f"aside (or pass another --identity-dir) and a new one will be created. "
+            f"The new one has a different NIP, so invoices still in flight under "
+            f"NIP {value.removeprefix('VATPL-')} can only be followed up with the old one"
+        )
     return TestIdentity(
         nip=value.removeprefix("VATPL-"),
         private_key_pem=key_path.read_bytes(),

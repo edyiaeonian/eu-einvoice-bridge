@@ -6,6 +6,7 @@ never sent twice.
 """
 
 import base64
+import dataclasses
 import datetime as dt
 import json
 
@@ -24,8 +25,10 @@ from eu_einvoice_bridge.ksef import (
     KsefError,
     Polling,
     StateStore,
+    Submission,
     SubmissionConflict,
     SubmissionError,
+    SubmissionInProgress,
     SubmissionUncertain,
     TransientError,
     create_test_identity,
@@ -164,11 +167,83 @@ class TestHappyPath:
 
     def test_the_file_name_is_safe_for_a_number_with_slashes(self, ksef, client, identity, store, sleeps):
         run(client, identity, store, sleeps)
-        assert store.path(NUMBER).name == "FV_2026_001.json"
+        name = store.path(NUMBER).name
+        assert name.startswith("FV_2026_001-") and name.endswith(".json")
+        assert "/" not in name
 
     def test_the_exact_bytes_sent_are_kept(self, ksef, client, identity, store, sleeps):
         run(client, identity, store, sleeps)
         assert store.xml_path(NUMBER).read_bytes() == XML
+
+
+class TestOneFilePerInvoiceNumber:
+    @pytest.mark.parametrize(
+        "other",
+        [
+            "FV_2026_001",  # the same once slashes are replaced
+            "FV 2026 001",
+            "fv/2026/001",  # the same on a case-insensitive file system
+        ],
+    )
+    def test_numbers_that_look_alike_get_different_files(self, store, other):
+        paths = {store.path(NUMBER).name.lower(), store.path(other).name.lower()}
+        assert len(paths) == 2
+
+    def test_polish_letters_are_not_folded_together(self, store):
+        assert store.path("FV/ą/1") != store.path("FV/ę/1")
+
+    def test_a_long_number_still_gives_a_short_name(self, store):
+        assert len(store.path("X" * 500).name) < 100
+
+    def test_a_record_for_another_number_is_never_used(self, store):
+        record = Submission(
+            invoice_number="FV/2026/002", source_hash="s", invoice_hash="h", status="accepted"
+        )
+        store.directory.mkdir(parents=True)
+        store.path(NUMBER).write_text(json.dumps(dataclasses.asdict(record)))
+        with pytest.raises(SubmissionError, match="FV/2026/002"):
+            store.load(NUMBER)
+
+    def test_an_accepted_look_alike_does_not_block_a_new_invoice(
+        self, ksef, client, identity, store, sleeps
+    ):
+        store.save(Submission(
+            invoice_number=NUMBER, source_hash="other", invoice_hash="h", status="accepted"
+        ))
+        # Before, both numbers mapped to one file, and this was a conflict.
+        other = submit(
+            "FV_2026_001",
+            SOURCE,
+            lambda: XML,
+            client=client,
+            identity=identity,
+            store=store,
+            sleep=sleeps.append,
+        )
+        assert other.status == "accepted"
+        assert store.load(NUMBER).source_hash == "other"
+
+
+class TestOneRunAtATime:
+    def test_a_second_run_is_refused_while_one_holds_the_lock(self, ksef, client, identity, store, sleeps):
+        with store.lock(NUMBER):
+            with pytest.raises(SubmissionInProgress, match=r"\.lock"):
+                run(client, identity, store, sleeps)
+        assert not ksef.calls
+
+    def test_the_lock_is_released_after_a_run(self, ksef, client, identity, store, sleeps):
+        run(client, identity, store, sleeps)
+        assert not store.lock_path(NUMBER).exists()
+
+    def test_the_lock_is_released_after_a_failure(self, ksef, client, identity, store, sleeps):
+        ksef["open"].respond(400)
+        with pytest.raises(KsefError):
+            run(client, identity, store, sleeps)
+        assert not store.lock_path(NUMBER).exists()
+
+    def test_other_numbers_are_not_blocked(self, ksef, client, identity, store, sleeps):
+        with store.lock("FV/2026/999"):
+            assert run(client, identity, store, sleeps).status == "accepted"
 
 
 class TestTheStateIsWrittenBeforeSending:
@@ -320,6 +395,40 @@ class TestRetries:
         ])
         assert run(client, identity, store, sleeps).status == "accepted"
         assert sleeps == [1.0, 2.0]
+
+    def test_a_429_waits_as_long_as_retry_after_asks(self, ksef, client, identity, store, sleeps):
+        ksef["status"].mock(side_effect=[
+            httpx.Response(429, headers={"Retry-After": "7"}),
+            httpx.Response(200, json=status(200, ksefNumber=KSEF_NUMBER)),
+        ])
+        assert run(client, identity, store, sleeps).status == "accepted"
+        assert sleeps == [7.0]
+
+    def test_a_shorter_retry_after_does_not_shorten_the_backoff(self, ksef, client, identity, store, sleeps):
+        ksef["status"].mock(side_effect=[
+            httpx.Response(503),
+            httpx.Response(429, headers={"Retry-After": "0"}),
+            httpx.Response(200, json=status(200, ksefNumber=KSEF_NUMBER)),
+        ])
+        run(client, identity, store, sleeps)
+        assert sleeps == [1.0, 2.0]
+
+    def test_a_retry_after_too_long_to_wait_gives_up_at_once(self, ksef, client, identity, store, sleeps):
+        ksef["status"].mock(side_effect=[
+            httpx.Response(429, headers={"Retry-After": "3600"}),
+        ])
+        result = run(client, identity, store, sleeps)
+        assert ksef["status"].call_count == 1
+        assert result.status == "sent" and "429" in result.error
+        assert sleeps == []
+
+    def test_an_http_date_retry_after_falls_back_to_the_backoff(self, ksef, client, identity, store, sleeps):
+        ksef["status"].mock(side_effect=[
+            httpx.Response(429, headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}),
+            httpx.Response(200, json=status(200, ksefNumber=KSEF_NUMBER)),
+        ])
+        run(client, identity, store, sleeps)
+        assert sleeps == [1.0]
 
     def test_retries_give_up_after_the_limit(self, ksef, client, identity, store, sleeps):
         ksef["upo"].respond(503)

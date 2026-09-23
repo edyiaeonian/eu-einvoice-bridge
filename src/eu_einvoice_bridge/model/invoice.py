@@ -124,10 +124,14 @@ class Invoice(BaseModel):
     @computed_field  # type: ignore[prop-decorator]  # as Pydantic's docs advise
     @cached_property
     def vat_breakdown(self) -> tuple[VatBreakdownEntry, ...]:
-        """BG-23, grouped per BR-S-08 and taxed per BR-CO-17.
+        """BG-23, grouped per BR-S-08, with tax per BR-CO-17's formula.
 
         Tax is computed once on the group total, not per line and summed: the
-        two differ by cents, and BR-CO-17 checks the group.
+        two differ by cents. That is not because BR-CO-17 would catch it -- the
+        rule compares absolute values within a tolerance of 1, far looser than a
+        cent. It is because tax is levied on the taxable amount of each rate, and
+        because both outputs must state the same figure: UBL and FA(3) read their
+        per-rate tax from here.
         """
         keys: list[tuple[VatCategory, Decimal]] = []
         lines_by_key: dict[tuple[VatCategory, Decimal], list[LineItem]] = {}

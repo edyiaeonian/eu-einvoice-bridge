@@ -15,14 +15,20 @@ On a rerun the record decides what happens:
   invoice and refused it): nothing is held by KSeF, so a corrected invoice may
   be sent under the same number
 
+Only one run may work on an invoice at a time: two runs that both find no
+record would both send. A lock file, created exclusively, keeps the second out.
+
 Tokens are held in memory only and never written to the record.
 """
 
 import datetime as dt
+import hashlib
 import json
+import os
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
@@ -41,6 +47,10 @@ class SubmissionError(Exception):
 
 class SubmissionConflict(SubmissionError):
     """A different document was already submitted under this invoice number."""
+
+
+class SubmissionInProgress(SubmissionError):
+    """Another run holds the lock for this invoice number."""
 
 
 class SubmissionUncertain(SubmissionError):
@@ -80,8 +90,15 @@ class StateStore:
         self._clock = clock
 
     def _stem(self, invoice_number: str) -> str:
-        # Invoice numbers carry slashes ("FV/2026/001"); file names cannot.
-        return re.sub(r"[^A-Za-z0-9._-]", "_", invoice_number)
+        # Invoice numbers carry slashes ("FV/2026/001"), which file names cannot.
+        # Replacing characters alone would map several numbers to one file --
+        # FV/2026/001, FV_2026_001 and FV 2026 001, or FV/ą/1 and FV/ę/1, and on
+        # a case-insensitive file system fv/1 and FV/1 -- so a hash of the exact
+        # number follows the readable part. It is lowercase hex, which no file
+        # system folds.
+        readable = re.sub(r"[^A-Za-z0-9._-]", "_", invoice_number)[:60]
+        digest = hashlib.sha256(invoice_number.encode("utf-8")).hexdigest()[:12]
+        return f"{readable}-{digest}"
 
     def path(self, invoice_number: str) -> Path:
         return self.directory / f"{self._stem(invoice_number)}.json"
@@ -94,11 +111,47 @@ class StateStore:
         # rendering again would give a different document and a different hash.
         return self.directory / f"{self._stem(invoice_number)}.fa3.xml"
 
+    def lock_path(self, invoice_number: str) -> Path:
+        return self.directory / f"{self._stem(invoice_number)}.lock"
+
+    @contextmanager
+    def lock(self, invoice_number: str) -> Iterator[None]:
+        """Held for a whole run, so two runs cannot both find no record and send.
+
+        O_EXCL makes creating the file and checking that it did not exist one
+        atomic step. A run killed outright leaves the file behind; the error
+        names it, since only a person can tell that no run is still going.
+        """
+        self.directory.mkdir(parents=True, exist_ok=True)
+        path = self.lock_path(invoice_number)
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        except FileExistsError:
+            raise SubmissionInProgress(
+                f"invoice {invoice_number} is locked by another run ({path}); if no "
+                f"other submit is running, a previous one was killed -- delete the "
+                f"file and run again"
+            ) from None
+        with os.fdopen(fd, "w") as lock_file:
+            lock_file.write(f"{os.getpid()}\n")
+        try:
+            yield
+        finally:
+            path.unlink(missing_ok=True)
+
     def load(self, invoice_number: str) -> Submission | None:
         path = self.path(invoice_number)
         if not path.exists():
             return None
-        return Submission(**json.loads(path.read_text(encoding="utf-8")))
+        record = Submission(**json.loads(path.read_text(encoding="utf-8")))
+        if record.invoice_number != invoice_number:
+            # The hash makes this practically impossible; if it ever happens,
+            # acting on another invoice's record could resend or block one.
+            raise SubmissionError(
+                f"{path} holds the record for invoice {record.invoice_number}, "
+                f"not {invoice_number}"
+            )
+        return record
 
     def save(self, record: Submission) -> Submission:
         record = replace(record, updated_at=self._clock().isoformat())
@@ -266,8 +319,33 @@ def submit(
     Once the invoice has been sent, a failure that retrying could fix does not
     raise: the record is returned still "sent", with the reason in `error`, so
     the caller knows a rerun will pick it up.
+
+    Raises SubmissionInProgress if another run is working on the same number.
     """
-    polling = polling or Polling()
+    with store.lock(invoice_number):
+        return _submit(
+            invoice_number,
+            source_hash,
+            render,
+            client=client,
+            identity=identity,
+            store=store,
+            sleep=sleep,
+            polling=polling or Polling(),
+        )
+
+
+def _submit(
+    invoice_number: str,
+    source_hash: str,
+    render: Callable[[], bytes],
+    *,
+    client: KsefClient,
+    identity: TestIdentity,
+    store: StateStore,
+    sleep: Callable[[float], None],
+    polling: Polling,
+) -> Submission:
     record = store.load(invoice_number)
 
     if record is not None and record.source_hash != source_hash:

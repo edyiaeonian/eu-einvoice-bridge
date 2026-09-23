@@ -181,7 +181,7 @@ $ einvoice submit invoice.json --test-seller
 created a self-signed KSeF TEST identity for NIP 5046948298 in certs/
 invoice.json: accepted by KSeF TEST
   KSeF number: 5046948298-20260921-906675C00000-7C
-  UPO:         state/CLI_a555c6.upo.xml
+  UPO:         state/CLI_a555c6-<hash>.upo.xml
 ```
 
 Three decisions carry most of the weight:
@@ -287,6 +287,13 @@ Both create `.venv/`. Then:
 ./.venv/bin/einvoice submit examples/invoice-fa3.json --test-seller
 ```
 
+To use the CLI without a checkout, a regular install carries everything it needs,
+vendored schemas included:
+
+```bash
+pip install git+https://github.com/edyiaeonian/eu-einvoice-bridge
+```
+
 `examples/invoice.json` is refused for FA(3), on purpose, for the three reasons shown
 [above](#what-it-looks-like). `submit` creates a self-signed test identity in `certs/`
 on first use and writes records and UPOs to `state/`; both are git-ignored.
@@ -338,18 +345,19 @@ BT/BR identifiers throughout are language-independent.
 
 ## Third-party assets
 
-`assets/` holds official schemas and validation artefacts, vendored unmodified so
-that every test runs offline. Each keeps its own licence, separate from this
-repository's code:
+`src/eu_einvoice_bridge/assets/` holds official schemas and validation artefacts,
+vendored unmodified so that every check runs offline. They live inside the package
+so that a regular (non-editable) install carries them. Each keeps its own licence,
+separate from this repository's code:
 
 | Path | Source | Licence |
 |---|---|---|
-| `assets/en16931/` | [ConnectingEurope/eInvoicing-EN16931](https://github.com/ConnectingEurope/eInvoicing-EN16931), `validation-1.3.16` | EUPL v1.2 |
-| `assets/ubl21/` | OASIS UBL 2.1 | OASIS copyright, notices retained |
-| `assets/fa3/` | [CIRFMF/ksef-api](https://github.com/CIRFMF/ksef-api) (formerly `ksef-docs`), pinned commit | MIT, Polish Ministry of Finance |
+| `en16931/` | [ConnectingEurope/eInvoicing-EN16931](https://github.com/ConnectingEurope/eInvoicing-EN16931), `validation-1.3.16` | EUPL v1.2 |
+| `ubl21/` | OASIS UBL 2.1 | OASIS copyright, notices retained |
+| `fa3/` | [CIRFMF/ksef-api](https://github.com/CIRFMF/ksef-api) (formerly `ksef-docs`), pinned commit | MIT, Polish Ministry of Finance |
 
-See [`assets/README.md`](assets/README.md) for provenance, pinned versions, and how
-each copy was checked against the officially published one.
+See [`assets/README.md`](src/eu_einvoice_bridge/assets/README.md) for provenance,
+pinned versions, and how each copy was checked against the officially published one.
 
 ## Licence
 

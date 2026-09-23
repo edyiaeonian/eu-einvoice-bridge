@@ -1,9 +1,9 @@
 """Command line entry point.
 
 Exit codes distinguish the two things a caller cares about: 1 means the invoice
-was read but is not acceptable, 2 means it could not be read at all. Conflating
-them would make the difference between "fix your invoice" and "fix your file"
-invisible to a script.
+was read but is not acceptable, 2 means a file could not be read at all -- or
+the output could not be written. Conflating them would make the difference
+between "fix your invoice" and "fix your file" invisible to a script.
 
 submit adds two more. 3 means the invoice is in KSeF and only following it up
 is unfinished -- still processing, or accepted with the UPO not yet downloaded;
@@ -34,6 +34,13 @@ EXIT_SUBMISSION_FAILED = 4
 
 class InputError(Exception):
     """The file could not be read or parsed — distinct from being invalid."""
+
+
+def _describe(exc: OSError) -> str:
+    """An OSError as a line for the user, where a traceback would be noise."""
+    if exc.filename is None:
+        return str(exc)
+    return f"{exc.filename}: {exc.strerror}"
 
 
 def _load(path: Path) -> Invoice:
@@ -118,7 +125,11 @@ def _convert_command(args: argparse.Namespace) -> int:
 
     assert xml is not None  # only a blocking error leaves no XML
     if args.output:
-        Path(args.output).write_bytes(xml)
+        try:
+            Path(args.output).write_bytes(xml)
+        except OSError as exc:
+            print(f"cannot write the output: {_describe(exc)}", file=sys.stderr)
+            return EXIT_UNREADABLE
         print(f"{path.name}: wrote {args.output}")
     else:
         sys.stdout.buffer.write(xml)
@@ -153,13 +164,28 @@ def _submit_command(args: argparse.Namespace) -> int:
 
     # Hashed before the seller is replaced: the record must follow the user's
     # invoice, not whichever test identity happens to be on disk.
+    #
+    # This hashes Pydantic's JSON rendering of the model, so it is only stable
+    # while that rendering is. A Pydantic release that spelled a Decimal or a
+    # date differently would make an invoice already in flight look changed,
+    # and a rerun would stop with a conflict rather than follow it up. uv.lock
+    # pins the version; an upgrade should be made with no submission pending.
     source_hash = hashlib.sha256(invoice.model_dump_json().encode()).hexdigest()
 
     identity_dir = Path(args.identity_dir)
-    identity = ksef.load_identity(identity_dir)
-    if identity is None:
-        identity = ksef.create_test_identity()
-        ksef.save_identity(identity, identity_dir)
+    try:
+        identity = ksef.load_identity(identity_dir)
+        created = identity is None
+        if identity is None:
+            identity = ksef.create_test_identity()
+            ksef.save_identity(identity, identity_dir)
+    except ksef.IdentityError as exc:
+        print(f"{path.name}: {exc}", file=sys.stderr)
+        return EXIT_SUBMISSION_FAILED
+    except OSError as exc:
+        print(f"{path.name}: test identity: {_describe(exc)}", file=sys.stderr)
+        return EXIT_SUBMISSION_FAILED
+    if created:
         print(
             f"created a self-signed KSeF TEST identity for NIP {identity.nip} in {identity_dir}/",
             file=sys.stderr,
@@ -200,6 +226,12 @@ def _submit_command(args: argparse.Namespace) -> int:
             )
     except (ksef.SubmissionError, ksef.KsefError) as exc:
         print(f"{path.name}: {exc}", file=sys.stderr)
+        return EXIT_SUBMISSION_FAILED
+    except OSError as exc:
+        # The state directory, most likely. Whatever was recorded before the
+        # failure still holds: a record saved as "sending" is looked up, not
+        # resent, on the next run.
+        print(f"{path.name}: {_describe(exc)}", file=sys.stderr)
         return EXIT_SUBMISSION_FAILED
 
     if record.status == "accepted":

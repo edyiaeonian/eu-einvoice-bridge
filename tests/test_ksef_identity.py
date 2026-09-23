@@ -4,6 +4,7 @@ The signature is verified here with signxml's own verifier against the
 certificate -- the same check KSeF TEST performs, minus its trust store.
 """
 
+import datetime as dt
 import os
 import stat
 from pathlib import Path
@@ -17,6 +18,7 @@ from signxml.xades import XAdESVerifier
 
 from eu_einvoice_bridge.ksef.identity import (
     AUTH_NS,
+    IdentityError,
     create_test_identity,
     load_identity,
     nip_checksum_ok,
@@ -103,6 +105,17 @@ class TestStorage:
 
     def test_a_missing_identity_loads_as_none(self, tmp_path):
         assert load_identity(tmp_path) is None
+
+    def test_an_expired_identity_is_refused_by_name(self, identity, tmp_path):
+        save_identity(identity, tmp_path)
+        later = dt.datetime.now(dt.UTC) + dt.timedelta(days=366)
+        with pytest.raises(IdentityError, match=f"expired on .*NIP {identity.nip}"):
+            load_identity(tmp_path, now=later)
+
+    def test_is_still_usable_the_day_before_it_expires(self, identity, tmp_path):
+        save_identity(identity, tmp_path)
+        later = dt.datetime.now(dt.UTC) + dt.timedelta(days=364)
+        assert load_identity(tmp_path, now=later) == identity
 
 
 class TestSignature:

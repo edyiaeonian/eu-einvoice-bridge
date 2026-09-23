@@ -5,6 +5,7 @@ test_ksef_submit.py, and against the real sandbox in test_ksef_live.py.
 """
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -148,6 +149,25 @@ def test_a_failed_submission_exits_4(workdir, sent, capsys):
     result["value"] = SubmissionUncertain("sent without an answer; it has not been resent")
     assert main(argv(workdir, invoice_file(workdir), "--test-seller")) == 4
     assert "not been resent" in capsys.readouterr().err
+
+
+def test_an_expired_identity_exits_4_and_says_so(tmp_path, sent, capsys, monkeypatch):
+    save_identity(create_test_identity(), tmp_path / "certs")
+    real_load = ksef.load_identity
+    later = datetime.now(UTC) + timedelta(days=400)
+    monkeypatch.setattr(ksef, "load_identity", lambda directory: real_load(directory, now=later))
+    calls, _ = sent
+    assert main(argv(tmp_path, invoice_file(tmp_path), "--test-seller")) == 4
+    assert "expired on" in capsys.readouterr().err
+    assert not calls
+
+
+def test_an_unwritable_state_dir_exits_4_without_a_traceback(workdir, sent, capsys):
+    _, result = sent
+    result["value"] = PermissionError(13, "Permission denied", str(workdir / "state"))
+    assert main(argv(workdir, invoice_file(workdir), "--test-seller")) == 4
+    err = capsys.readouterr().err
+    assert "Permission denied" in err and "state" in err
 
 
 def test_the_source_hash_does_not_depend_on_the_test_identity(tmp_path, sent):

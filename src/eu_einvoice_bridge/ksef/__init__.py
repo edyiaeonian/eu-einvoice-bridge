@@ -2,6 +2,7 @@
 
 from .client import TEST_BASE_URL, KsefClient, KsefError, TransientError
 from .identity import (
+    IdentityError,
     TestIdentity,
     create_test_identity,
     load_identity,
@@ -15,12 +16,14 @@ from .submit import (
     Submission,
     SubmissionConflict,
     SubmissionError,
+    SubmissionInProgress,
     SubmissionUncertain,
     submit,
 )
 
 __all__ = [
     "TEST_BASE_URL",
+    "IdentityError",
     "KsefClient",
     "KsefError",
     "Polling",
@@ -28,6 +31,7 @@ __all__ = [
     "Submission",
     "SubmissionConflict",
     "SubmissionError",
+    "SubmissionInProgress",
     "SubmissionUncertain",
     "TestIdentity",
     "TransientError",

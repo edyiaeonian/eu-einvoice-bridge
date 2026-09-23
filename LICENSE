@@ -25,11 +25,14 @@ SOFTWARE.
 THIRD-PARTY ASSETS
 
 This licence covers the source code authored in this repository. It does NOT
-cover the third-party schemas and validation artefacts vendored under `assets/`,
+cover the third-party schemas and validation artefacts vendored under
+`src/eu_einvoice_bridge/assets/`,
 each of which keeps its own licence:
 
-  assets/en16931/  EUPL v1.2            see assets/en16931/LICENSE.txt
-  assets/ubl21/    OASIS copyright      notices retained in each file
-  assets/fa3/      MIT, Ministerstwo Finansow   see assets/fa3/LICENSE.txt
+  en16931/  EUPL v1.2                    see en16931/LICENSE.txt
+  ubl21/    OASIS copyright              notices retained in each file
+  fa3/      MIT, Ministerstwo Finansow   see fa3/LICENSE.txt
 
-See assets/README.md for provenance and version details.
+(paths relative to src/eu_einvoice_bridge/assets/)
+
+See src/eu_einvoice_bridge/assets/README.md for provenance and version details.

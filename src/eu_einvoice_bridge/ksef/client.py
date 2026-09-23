@@ -32,11 +32,39 @@ class KsefError(Exception):
 
 
 class TransientError(KsefError):
-    """A timeout, a dropped connection, 429 or a 5xx: it may work later."""
+    """A timeout, a dropped connection, 429 or a 5xx: it may work later.
+
+    retry_after is the server's Retry-After in seconds, when it gave one.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        body: str = "",
+        retry_after: float | None = None,
+    ):
+        super().__init__(message, status_code, body)
+        self.retry_after = retry_after
+
+
+# The longest Retry-After this waits out. A longer one gives up instead: the
+# caller's state lets a later run carry on, which beats a silent long pause.
+MAX_RETRY_AFTER_SECONDS = 60.0
 
 
 def _is_transient(response: httpx.Response) -> bool:
     return response.status_code == 429 or response.status_code >= 500
+
+
+def _retry_after(response: httpx.Response) -> float | None:
+    """Retry-After in its delay-seconds form.
+
+    The HTTP-date form is not read: it depends on agreeing clocks, and falling
+    back to the usual backoff is harmless.
+    """
+    value = response.headers.get("Retry-After", "").strip()
+    return float(value) if value.isdigit() else None
 
 
 class KsefClient:
@@ -63,6 +91,7 @@ class KsefClient:
                 f"{method} {path}: HTTP {response.status_code}",
                 response.status_code,
                 response.text,
+                retry_after=_retry_after(response),
             )
         if response.status_code >= 400:
             raise KsefError(
@@ -73,14 +102,23 @@ class KsefClient:
         return response
 
     def _idempotent(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
-        """Retried with exponential backoff; only for requests safe to repeat."""
+        """Retried with exponential backoff; only for requests safe to repeat.
+
+        A Retry-After from the server (sent with 429) replaces the backoff when
+        it is longer, up to MAX_RETRY_AFTER_SECONDS.
+        """
         for attempt in range(self._retries + 1):
             try:
                 return self._send(method, path, **kwargs)
-            except TransientError:
+            except TransientError as exc:
                 if attempt == self._retries:
                     raise
-                self._sleep(self._backoff * 2**attempt)
+                delay = self._backoff * 2**attempt
+                if exc.retry_after is not None:
+                    if exc.retry_after > MAX_RETRY_AFTER_SECONDS:
+                        raise
+                    delay = max(delay, exc.retry_after)
+                self._sleep(delay)
         raise AssertionError("unreachable")
 
     @staticmethod

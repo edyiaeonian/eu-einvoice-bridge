@@ -165,6 +165,13 @@ class TestInputProblems:
         assert "nope.json" in output
         assert "Traceback" not in output
 
+    def test_an_unwritable_output_is_reported_without_a_traceback(self, tmp_path, capsys):
+        target = tmp_path / "missing-dir" / "out.xml"
+        code, output = run(capsys, "convert", str(FA3_EXAMPLE), "-o", str(target))
+        assert code == 2
+        assert "missing-dir" in output
+        assert "Traceback" not in output
+
     def test_malformed_json_is_reported_clearly(self, tmp_path, capsys):
         code, output = run(capsys, "validate", write(tmp_path, "{not json"))
         assert code == 2

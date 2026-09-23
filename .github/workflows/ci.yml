@@ -40,21 +40,40 @@ jobs:
         run: uv run --no-sync pytest
 
       # The suite imports the package via pythonpath, so it would pass even if
-      # the installed entry point were broken. This exercises the path a user
-      # actually takes.
+      # the installed entry point were broken.
       - name: Smoke-test the installed CLI
         run: |
           source .venv/bin/activate
-          einvoice validate examples/invoice.json
-          einvoice convert examples/invoice.json -o /tmp/invoice.xml
-          grep -q "urn:cen.eu:en16931:2017" /tmp/invoice.xml
-          einvoice validate examples/invoice-fa3.json --format fa3
-          einvoice convert examples/invoice-fa3.json --format fa3 -o /tmp/invoice-fa3.xml
-          grep -q "http://crd.gov.pl/wzor/2025/06/25/13775/" /tmp/invoice-fa3.xml
-          einvoice validate examples/invoice-eur.json
-          einvoice validate examples/invoice-eur.json --format fa3
-          # submit needs the KSeF sandbox, so CI only checks that it loads.
-          einvoice submit --help > /dev/null
+          .github/smoke-test.sh
+
+  # uv sync installs the project editable, so the package it runs is the
+  # checkout and anything outside src/ still resolves. A user who runs
+  # `pip install git+...` gets a wheel instead; this installs one the same way,
+  # into a venv that has never seen the repo, and runs the same smoke test.
+  wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Build
+        run: uv build --out-dir dist
+
+      - name: Install the wheel, not editable
+        run: |
+          uv venv "$RUNNER_TEMP/wheel-venv"
+          uv pip install --python "$RUNNER_TEMP/wheel-venv" dist/*.whl
+
+      - name: Smoke-test the installed wheel
+        run: |
+          source "$RUNNER_TEMP/wheel-venv/bin/activate"
+          # Fail loudly if the checkout, rather than the wheel, is imported.
+          python -c "import eu_einvoice_bridge, sys; sys.exit('site-packages' not in eu_einvoice_bridge.__file__)"
+          .github/smoke-test.sh
 
   lint:
     runs-on: ubuntu-latest
